@@ -54,14 +54,26 @@ attribution = argmax → DECLARATION / OPERATION / BOTH / CLEAN
 | 方法 | 增量 (ms) | 范围 |
 |---|---|---|
 | Static Regex | <0.1 | CPU |
+| cisco-ai-skill-scanner | <1 | CPU |
 | TF-IDF + LR | ~2 | CPU |
 | Boundary only | 20.1 | Shared-prefill |
 | **SkillProbe v1** | **18.7** | Shared-prefill |
 | **SkillProbe v2** | **~18.8** | Shared-prefill（Pass A ~50ms） |
+| RENNERVATE | ~35 | Shared-prefill |
 | RouteGuard (full) | ~60 | Shared-prefill |
 | LLM-as-Judge | ~600 | Standalone |
 
 所有内部方法共享 agent 必做的 prefill（~1945ms），检测几乎免费。**SkillProbe 是最快的内部方法。**
+
+### 待补充基线
+
+| 基线 | 类型 | 优先级 |
+|---|---|---|
+| PromptArmor (Shi et al. 2025) | 文本侧最强 IPI 防御 | 高 |
+| SkillScan (Liu et al. 2026b) | 静态+LLM 混合筛查 | 高 |
+| RENNERVATE (Zhong et al. 2025) | 注意力检测，RG 最强竞争者 | 高 |
+| Attention Tracker (Hung et al. 2024) | 注意力路由检测 | 中 |
+| Skill-Inject input filtering (Schmotz et al. 2026) | Naive 下界 | 中 |
 
 ---
 
