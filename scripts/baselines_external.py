@@ -8,10 +8,10 @@ Runnable (no extra dependencies):
   3. Skill-Inject Input Filtering — naive keyword filter from Schmotz et al. 2026
 
 Requires external repos (manual setup):
-  4. cisco-ai-skill-scanner — https://github.com/cisco-ai/skill-scanner (private/enterprise)
-  5. PromptArmor            — https://github.com/ethz-spylab/promptarmor
-  6. RENNERVATE             — https://github.com/lucas-zhong/RENNERVATE
-  7. Attention Tracker      — https://github.com/IBM/attention-tracker
+  4. cisco-ai-skill-scanner — https://github.com/cisco-ai-defense/skill-scanner
+  5. PromptArmor            — CODE NOT PUBLIC (Dawn Song group, arXiv:2507.15219)
+  6. RENNERVATE             — CODE NOT PUBLIC (arXiv:2512.08417, no repo found)
+  7. Attention Tracker      — https://github.com/khhung-906/Attention-Tracker
 
 Usage:
   python scripts/baselines_external.py --input data/decoy/lexical_decoy_prompts_155.jsonl --output results/ext_baselines.json
