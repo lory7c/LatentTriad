@@ -11,7 +11,7 @@ LLM agent 在执行用户任务前，越来越多地从远程仓库加载第三�
 现有方法都未在此节点操作：
 - **静态扫描器**（读文本 → 可被 SkillCloak 混淆绕过，检出率从 98.6% 暴跌至 10.1%）
 - **沙箱检测**（执行后确认恶意 → 为时已晚）
-- **LLM 审计**（慢、不可靠、FPR=100%）
+- **LLM 审计**（慢、开源小模型查的话不可靠、FPR=100%，在线api烧钱）
 
 **现有 hidden-state 方法（RouteGuard、AgentLens）在 unpaired benchmark 上评估，受 source confound 影响；且均读取单点/单一信号源，缺乏对 skill 结构的几何分解。**
 
