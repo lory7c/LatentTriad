@@ -135,6 +135,7 @@
 
 | SMP Stealth V2 — Paired Counterfactual Benchmark |  |  |  |  |  |  |  |  |  |
 | Paired CF, 484 samples. L7+ layer selection (L3 excluded). N |  |  |  |  |  |  |  |  |  |
+| Method | AUROC | FPR% | FNR% | F1% | Precision% | Recall% | Train AUC | Notes |  |
 | Static Regex | 0.54 | 100 | 0 | 66.7 | 50 | 100 | — | Always fires |  |
 | Skill-Inject Filter | 0.528 | 100 | 0 | 66.7 | 50 | 100 | — | Schmotz et al. 2026, naive input filter. FPR=100% |  |
 | TF-IDF + LR | 0.812 | 19.4 | 3.2 | 89.6 | 83.3 | 96.8 | 0.679 | C=0.01, unique prompt |  |
@@ -156,6 +157,7 @@
 
 | MSB (MalSkillBench) — Unpaired, Source Confound Evidence |  |  |  |  |  |  |  |  |
 | Unpaired, 7894 samples, new triad extract. L7+ verified (bes |  |  |  |  |  |  |  |  |
+| Method | AUROC | FPR% | FNR% | F1% | Precision% | Recall% | Train AUC | Notes |
 | Static Regex | 0.54 | 100 | 0 | 66.7 | 49.6 | 100 | — | Always fires |
 | Skill-Inject Filter | 0.502 | 100 | 0 | 66.7 | 49.6 | 100 | — | Naive filter: always fires on 8K samples |
 | TF-IDF + LR | 0.967 | 6.4 | 10.7 | 91.1 | 93 | 89.3 | 0.973 | C=0.01 |
@@ -177,6 +179,7 @@
 
 | MASB 75K — Large-Scale Benign FPR Benchmark |  |  |  |  |  |  |  |  |
 | 4K MASB benign + MSB malicious (3939), 70/15/15 split. In-do |  |  |  |  |  |  |  |  |
+| Method | AUROC | FPR% | FNR% | F1% | Precision% | Recall% | Train AUC | Notes |
 | Static Regex | 0.586 | 100 | 0 | 66.7 | 49.6 | 100 | — | Always fires (OOD) |
 | Skill-Inject Filter | 0.505 | 100 | 0 | 66.4 | 49.6 | 100 | — | Naive filter: always fires on 8K samples |
 | TF-IDF + LR | 0.792 | 6.4 | 10.7 | 91.1 | 71.3 | 71.8 | 0.973 | Estimated from MSB |
@@ -198,6 +201,7 @@
 
 | Lexical Decoy — Suspicious Vocabulary, Benign Semantics (155 |  |  |  |  |  |  |  |  |  |
 | 155 decoys + 62 SMP mal paired. Unified internal contract. L |  |  |  |  |  |  |  |  |  |
+| Method | AUROC | FPR% | FNR% | F1% | Precision% | Recall% | Train AUC | Notes |  |
 | Static Regex | 0.463 | 100 | 0 | 66.7 | 42 | 48.3 | — | Static Regex on 155 decoys: FPR=59% (better than old 100%—mo |  |
 | Skill-Inject Filter | 0.8 | 40 | 0 | 83.4 | 50.2 | 100 | — | Schmotz et al. 2026, naive input filtering |  |
 | TF-IDF + LR | 0.7435 | 39.3 | 39.1 | 60.9 | 50 | 100 | — | TF-IDF on 155 decoys: FPR=100% (suspicious vocab = malicious |  |
@@ -219,6 +223,7 @@
 
 | Inverse Decoy — Clean Vocabulary, Malicious Semantics (155 p |  |  |  |  |  |  |  |  |  |
 | 155 clean + 155 malicious. SMP-trained. L7+. Vocab-clean sem |  |  |  |  |  |  |  |  |  |
+| Method | AUROC | FPR% | FNR% | F1% | Precision% | Recall% | Train AUC | Notes |  |
 | Static Regex | 0.994 | 100 | 0 | 66.7 | 50 | 100 | — | Regex on clean vocab: FPR=0% FNR=100%—no patterns to match.  |  |
 | Skill-Inject Filter | 0.5 | 100 | 0 | 66.7 | 50 | 100 | — | Naive filter: clean vocab -> always fires |  |
 | TF-IDF + LR | 0.1593 | 78.1 | 78.1 | 21.9 | 46.3 | 78.1 | — | TF-IDF on clean vocab: AUC=0.50 random (vocab has no signal) |  |
