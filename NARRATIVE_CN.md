@@ -13,11 +13,11 @@ LLM agent 在执行用户任务前，越来越多地从远程仓库加载第三�
 - **沙箱检测**（执行后确认恶意 → 为时已晚）
 - **LLM 审计**（慢、不可靠、FPR=100%）
 
-**没有已发表的方法在 pre-action boundary 读取模型的内部状态。**
+**现有 hidden-state 方法（RouteGuard、AgentLens）在 unpaired benchmark 上评估，受 source confound 影响；且均读取单点/单一信号源，缺乏对 skill 结构的几何分解。**
 
 ---
 
-## 2. 核心空白：Source Confound
+## 2. 核心空白：Source Confound + 结构盲区
 
 所有已发表的 agent skill 检测方法都在**良性和恶意样本来源不同**的 benchmark 上评估。表面文本分类器利用这些来源差异进行检测：
 
@@ -44,7 +44,7 @@ LLM agent 在执行用户任务前，越来越多地从远程仓库加载第三�
 | **沙箱/动态** | SkillDetonate, AgentArmor | 执行后才检测。恶意已造成损害 |
 | **Hidden-State** | RouteGuard, AgentLens | RouteGuard: attention 特征在 stealth 攻击上失效 (FNR=45%)。AgentLens: 只读 boundary 单点，漏掉分布式信号 (FNR=55%)。两者均在 unpaired benchmark 上评估 |
 
-**我们是第一个 (a) 在 pre-action boundary 操作而不执行, (b) 在配对反事实数据上控制 source confound 评估, (c) 将表示分解为 declaration-operation-boundary 几何关系的工作。**
+**我们是第一个将 hidden-state 分解为 declaration-operation-boundary 三区域几何关系、在配对反事实数据上消除 source confound、并通过 centering+gating 实现跨分布鲁棒检测的工作。**
 
 ---
 
@@ -211,12 +211,12 @@ Llama-3.1-8B, BF16, 15K token prompt, 实测：
 
 ## 7. 贡献
 
-1. **配对反事实 benchmark (SMP Stealth V2)**：首个在 agent skill 检测中控制 source/style/vocabulary confound 的评估协议。
+1. **配对反事实 benchmark (SMP Stealth V2)**：首个在 agent skill 检测中控制 source/style/vocabulary confound 的评估协议。证明现有 hidden-state 方法（RouteGuard: 0.824, AgentLens: 0.871）在消除 confound 后均显著低于报告值。
 
-2. **三区域几何检测 + centering + gating (v4)**：oper+bnd 关系特征 + 去 PC1 + Boundary 安全门，在配对 CF 数据上 AUROC=0.947，Decoy FPR 双归零。
+2. **三区域几何检测 + centering + gating (v4)**：首次将 skill 表示分解为 operation-boundary 几何关系，通过去 PC1 消除模板噪声、Boundary 安全门消除误报。SMP AUROC=0.947，Decoy FPR 双归零。比 RouteGuard 快 3×，比 AgentLens 的 FNR 低 45pp。
 
-3. **2×2 诊断矩阵**：Lexical Decoy (FPR) + Inverse Decoy (FNR) 证明内部方法读的是行为语义而非关键词分布。
+3. **2×2 诊断矩阵**：Lexical Decoy (FPR) + Inverse Decoy (FNR) 证明几何方法读的是行为语义而非关键词分布——这一区分是 RouteGuard/AgentLens 等单一信号方法无法做出的。
 
 4. **双趟恶意归因**：首个区分恶意信号来自声明还是代码的方法，100% 准确率，0.08ms 额外开销。
 
-5. **共享 prefill 部署**：检测增加 18.7ms——最快的内部方法且比 LLM 审计快 30×。
+5. **共享 prefill 部署**：检测增加 18.7ms——最快的内部方法，比 Boundary 快 7%，比 RouteGuard 快 3×，比 LLM 审计快 30×。
