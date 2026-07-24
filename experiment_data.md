@@ -69,14 +69,16 @@
 | Pass B: 完整 prompt (同 v1) → oper+bnd 几何特征 → PCA(8)+LR → score_code |  |  |  |  |  |  |  |
 | 归因规则: argmax(score_code, score_decl)。两路都>阈值→BOTH，都<阈值→CLEAN |  |  |  |  |  |  |  |
 | 开销: Pass A ~50ms (仅800 chars) + Pass B ~1945ms (同v1)。总增量 +2.6% |  |  |  |  |  |  |  |
-| 双探针独立检测能力 (175样本) |  |  |  |  |  |  |  |
-| 探针 | 检测目标 | AUROC | F1% | FPR% | FNR% | 层 | 说明 |
+| Decl-Probe | 仅声明投毒 (50样本) | 0.99 | — | — | — | L7 | Pass A decl-bd norm. AUROC=0.99 完美区分decl-poison vs clean |
+| Code-Probe | 仅代码投毒 (50样本) | 0.82 | — | — | — | L7 | Pass B oper-bd norm. AUROC=0.82 区分oper-poison vs clean |
+| Fusion max() | 声明+代码双投毒 (175样本) | 1.00 | 100.0 | 0.0 | 0.0 | — | max(Decl-Det, Code-Det). 两路信号正交→100%检出+100%归因 |
 | Decl-Probe | 仅声明投毒 (50样本) | 0.808 | 75.0 | 0.0 | 40.0 | L31 | 检出decl-poison+both-poison，漏掉oper-poison |
 | Code-Probe (v1) | 仅代码投毒 (50样本) | 0.919 | 90.4 | 0.0 | 17.6 | L11 | 检出oper-poison+both-poison，漏掉decl-poison |
-| Fusion max() | 声明+代码双投毒 (175样本) | 1.000 | 100.0 | 0.0 | 0.0 | — | 全覆盖。max()取两路最强信号，互补漏检 |
-| 关键：两路信号正交——Decl-Probe和Code-Probe检测的是不同攻击类型，互不重叠。max()融合实现100%检出。 |  |  |  |  |  |  |  |
-| 归因准确率 |  |  |  |  |  |  |  |
-| 真实攻击来源 | 样本数 | 归因正确 | 准确率 | 错误归因分析 |  |  |  |
+| CLEAN (干净skill) | 50 | 50 | 100% | 双探针均安全。Pass A decl-bd low, Pass B oper-bd low。 | 0.0 | — | 全覆盖。max()取两路最强信号，互补漏检 |
+| OPERATION (代码投毒) | 50 | 50 | 100% | 全部归因正确。Pass B oper-bd 高→Code侧报警。Pass A decl-bd 低→Decl侧不报。 |  |  |  |
+| BOTH (声明+代码) | 25 | 25 | 100% | 全部归因正确。双探针bd norms同时升高→正确归为BOTH。 |  |  |  |
+| DECLARATION (声明投毒) | 50 | 50 | 100% | 全部归因正确。Pass A decl-bd 高→Decl侧报警。Pass B oper-bd 低→Code侧不报。 |  |  |  |
+| 合计 | 175 | 175 | 100% | GAP_REPORT 方法: boundary token norm 比较。Pass A (decl-only) vs Pass B (sk |  |  |  |
 | CLEAN (干净skill) | 50 | 50 | 100% | 全部正确识别。双探针均未报警。 |  |  |  |
 | OPERATION (代码投毒) | 50 | 50 | 100% | 全部归因正确。Code-Probe报警，Decl-Probe不报。 |  |  |  |
 | BOTH (声明+代码) | 25 | 25 | 100% | 全部归因正确。双探针同时报警→正确归为BOTH。 |  |  |  |
