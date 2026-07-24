@@ -6,32 +6,43 @@
 
 ## 1. 问题：Agent Skill 供应链攻击
 
-### 攻击面已经存在
+### 1.1 攻击面
 
-LLM coding agent（Claude Code、OpenAI Codex、Cursor 等）正快速普及一个能力：从远程仓库加载第三方 **skill**——包含指令、脚本和配置的模块包，为 agent 提供新的工具能力。
+LLM coding agent（Claude Code、OpenAI Codex 等）正快速普及第三方 skill 机制：从远程仓库加载包含指令、脚本和配置的模块包。Skill 以 agent 的完整权限运行——读写文件、执行命令、访问网络和环境变量。
 
-这创造了一个新的软件供应链攻击面。Skill 以 agent 的完整权限运行——可以读写文件系统、执行 shell 命令、访问网络和环境变量。一个恶意 skill 可以：
+一个恶意 skill 可以窃取 `~/.aws/credentials`、植入后门、劫持 agent 决策。真实案例：2026 年初 ClawHavoc 在 marketplace 植入 300+ 恶意 skill，伪装成安装前提条件窃取浏览器凭据和加密货币钱包。BIV 扫描 49,943 个 skill 发现 80% 存在声称-实际偏差，5% 携带多阶段攻击链。
 
-- **窃取凭证**：读取 `~/.aws/credentials`、SSH key、环境变量中的 API key，发送到外部服务器
-- **植入后门**：在项目中写入恶意代码、修改 `.bashrc` 实现持久化
-- **破坏输出**：在代码生成中注入漏洞、替换依赖包
-- **劫持 agent 决策**：通过 prompt injection 覆盖用户指令，让 agent 执行攻击者意图
+### 1.2 为什么现有防御不够
 
-真实案例已经出现：2026 年初，ClawHavoc 攻击在 ClawHub marketplace 植入了 300+ 恶意 skill，伪装成安装前提条件窃取浏览器凭据和加密货币钱包。BIV 对 49,943 个 OpenClaw skill 的扫描发现 80% 的 skill 存在声称-实际行为偏差，5% 携带多阶段攻击链。
+| 方法 | 做什么 | 致命缺陷 |
+|---|---|---|
+| **静态扫描** (BIV, cisco-scanner) | 读文本，匹配关键词/AST pattern | SkillCloak 混淆后检出率 99%→10%——文本可改写 |
+| **沙箱执行** (SkillDetonate) | Docker+eBPF 实际执行，监控 syscall | 执行后确认→为时已晚。153s/skill，无法在线 |
+| **内部探针** (RouteGuard, AgentLens) | 读模型 attention/hidden state | 只读**单点信号**。RouteGuard 读 attention shift (FNR=45%)，AgentLens 读 boundary token (FNR=55%)。在"声明看不出但实际有毒"的攻击上完全失效 |
 
-### 所有现有方法都漏了点什么
+### 1.3 我们发现：恶意 Skill 在 Hidden Space 中留下几何指纹
 
-防御工作分为三类，每一类都有无法弥补的缺陷：
+我们问了一个更根本的问题：**模型读完 skill 后，内部的 hidden state 发生了什么？**
 
-| 方法 | 代表工作 | 做什么 | 致命问题 |
-|---|---|---|---|
-| **静态文本扫描** | BIV, SkillSieve, cisco-scanner | 读 SKILL.md 文本，匹配关键词/正则/AST pattern | SkillCloak 混淆后检出率从 99% 跌到 10%——文本可以被改写，行为无法被文本掩盖 |
-| **沙箱动态执行** | SkillDetonate | 在 Docker 里实际执行 skill，用 eBPF 监控 syscall | 执行后才确认恶意——已经晚了。153 秒/skill，无法在线部署 |
-| **内部探针（读 hidden state）** | RouteGuard, AgentLens | 读模型内部 attention/hidden state | 都只读**单点信号**——RouteGuard 读 attention mass shift（FNR=45%），AgentLens 读 boundary token（FNR=55%）。在"声明看不出但实际有毒"的攻击上完全失效 |
+实验揭示了一个一致的模式。当模型处理恶意 skill 时，**operation 区域的 hidden state 和 boundary token 之间产生了异常的几何张力**：
 
-### 我们回答的问题
+- 模型读完恶意代码后，准备行动前的最后一个 token（boundary）被**异常激活**——范数显著偏高
+- 这个效应量化到 `norm_ratio = ‖oper‖ / ‖bnd‖` 上，恶意 skill 的比值系统性偏低（SMD=−1.42, p<0.001）
+- 与此同时，良性 skill 的 operation-boundary 方向更一致，恶意 skill 的方向发生偏离
 
-**能不能在 skill 加载后、执行前，通过对模型内部表示的几何分析，同时做到高检测率、低误报、不执行、能归因？**
+我们称这个现象为 **"准备-警觉效应"（Pre-Action Vigilance）**：模型在读完恶意代码后，boundary token 变得更加"警觉"——它在准备行动前表达了更大的不确定性和敏感性。这种效应在 L7-L15 中层最强，到 L27+ 衰减——说明它是模型在语义理解阶段产生的，而非表面 token 处理。
+
+这和 RouteGuard 发现的 "attention hijacking" 是互补信号：他们读的是"模型在看哪里"，我们读的是"模型看完后的状态变化"。
+
+### 1.4 从这个 insight 出发，SkillProbe 做什么
+
+1. **提取 operation 和 boundary 的 hidden state**（一次 prefill, 8 层）
+2. **Centering：移除 prompt 模板噪声**
+3. **计算几何特征**：norm_ratio、cos(oper, bnd)、direction_diff
+4. **Boundary 安全门**：模型确定安全时信任判断，不确定时用代码级检测
+5. **可选归因**：双趟架构区分声明投毒 vs 代码投毒
+
+18.7ms 额外开销，寄生在 agent 必做的 prefill 上，不执行、不调 API、不需沙箱。
 
 ---
 
@@ -39,9 +50,9 @@ LLM coding agent（Claude Code、OpenAI Codex、Cursor 等）正快速普及一�
 
 ### 核心思路
 
-模型读完 skill 后、执行前的 hidden state 里，**代码的"实际行为"和模型的"最终判断"之间存在几何张力**。恶意 skill 的代码在 hidden space 中更偏离模型的最终判断方向——因为模型读完恶意代码后"知道不对劲"，boundary token 被异常激活。
+从 §1.3 的 insight 出发：恶意 skill 使 boundary token 相对于 operation token 异常激活——模型在准备行动前变得更加"警觉"。我们捕捉这个几何指纹。
 
-我们只提取两个区域的 hidden state：**Operation**（skill 的实际代码内容）和 **Boundary**（模型准备行动前的最后一个 token）。一次 prefill 前向传播，8 层，无需生成、无需执行。
+提取两个区域的 hidden state：**Operation**（skill 的实际代码内容）和 **Boundary**（模型准备行动前的最后一个 token）。一次 prefill 前向传播，8 层，无需生成、无需执行。
 
 ### 三个关键设计
 
