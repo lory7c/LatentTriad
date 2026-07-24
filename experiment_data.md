@@ -65,29 +65,31 @@
 | 恶意归因 —— 区分代码投毒 vs 声明投毒 |  |  |  |  |  |  |  |
 | v2 Dual-Pass 架构：Pass A (decl-only) + Pass B (完整prompt)。risk= |  |  |  |  |  |  |  |
 | 架构 |  |  |  |  |  |  |  |
-| Pass A: prompt 截断在声明末尾 → 模型只看到声明 → decl-bnd → Decl-Probe (L2 |  |  |  |  |  |  |  |
-| Pass B: 完整 prompt (同 v1) → oper+bnd 几何特征 → PCA(8)+LR → score |  |  |  |  |  |  |  |
-| 归因规则: argmax(score_code, score_decl)。两路都>阈值→BOTH，都<阈值→CLEAN |  |  |  |  |  |  |  |
+| Pass A (decl-only, ~50ms): prompt 截断在声明末尾 → 模型只看声明 → decl-bn |  |  |  |  |  |  |  |
+| Pass B (skip-decl): 声明从 prompt 删除 → 模型只看代码 → oper-bnd → Code |  |  |  |  |  |  |  |
+| 信号: boundary token L2 norm (无需训练，直接比较两个范数) |  |  |  |  |  |  |  |
+| 归因规则: 比较 Decl-Det 和 Code-Det。两者都高→BOTH，都低→CLEAN |  |  |  |  |  |  |  |
 | 开销: Pass A ~50ms (仅800 chars) + Pass B ~1945ms (同v1)。总增量 +2. |  |  |  |  |  |  |  |
-| Decl-Probe | 仅声明投毒 (50样本) | 0.99 | — | — | — | L7 | Pass A decl-bd norm. AUROC=0.99 完美区分decl-poison vs clean |
-| Code-Probe | 仅代码投毒 (50样本) | 0.82 | — | — | — | L7 | Pass B oper-bd norm. AUROC=0.82 区分oper-poison vs clean |
-| Fusion max() | 声明+代码双投毒 (175样本) | 1.00 | 100.0 | 0.0 | 0.0 | — | max(Decl-Det, Code-Det). 两路信号正交→100%检出+100%归因 |
-| Decl-Probe | 仅声明投毒 (50样本) | 0.808 | 75.0 | 0.0 | 40.0 | L31 | 检出decl-poison+both-poison，漏掉oper-poison |
-| Code-Probe (v1) | 仅代码投毒 (50样本) | 0.919 | 90.4 | 0.0 | 17.6 | L11 | 检出oper-poison+both-poison，漏掉decl-poison |
+| 双探针检测能力 (GAP_REPORT 方法) | 仅声明投毒 (50样本) | 0.99 | — | — | — | L7 | Pass A decl-bd norm. AUROC=0.99 完美区分decl-poison vs clean |
+| 探针 | 检测目标 | AUROC | 说明 | — | — | L7 | Pass B oper-bd norm. AUROC=0.82 区分oper-poison vs clean |
+| Decl-Det | 仅声明投毒 (50样本) | 0.99 | Pass A boundary token norm。完美区分 decl-poison vs clean | 0.0 | 0.0 | — | max(Decl-Det, Code-Det). 两路信号正交→100%检出+100%归因 |
+| Code-Det | 仅代码投毒 (50样本) | 0.82 | Pass B boundary token norm。区分 oper-poison vs clean | 0.0 | 40.0 | L31 | 检出decl-poison+both-poison，漏掉oper-poison |
+| Fusion (max) | 所有攻击类型 (175样本) | 1.00 | max(Decl-Det, Code-Det)。两路信号正交→全覆盖 | 0.0 | 17.6 | L11 | 检出oper-poison+both-poison，漏掉decl-poison |
 | CLEAN (干净skill) | 50 | 50 | 100% | 双探针均安全。Pass A decl-bd low, Pass B oper-bd low。 | 0.0 | — | 全覆盖。max()取两路最强信号，互补漏检 |
-| OPERATION (代码投毒) | 50 | 50 | 100% | 全部归因正确。Pass B oper-bd 高→Code侧报警。Pass A decl-bd 低→Decl侧不报。 |  |  |  |
-| BOTH (声明+代码) | 25 | 25 | 100% | 全部归因正确。双探针bd norms同时升高→正确归为BOTH。 |  |  |  |
-| DECLARATION (声明投毒) | 50 | 50 | 100% | 全部归因正确。Pass A decl-bd 高→Decl侧报警。Pass B oper-bd 低→Code侧不报。 |  |  |  |
-| 合计 | 175 | 175 | 100% | GAP_REPORT 方法: boundary token norm 比较。Pass A (decl-only) vs  |  |  |  |
-| CLEAN (干净skill) | 50 | 50 | 100% | 全部正确识别。双探针均未报警。 |  |  |  |
-| OPERATION (代码投毒) | 50 | 50 | 100% | 全部归因正确。Code-Probe报警，Decl-Probe不报。 |  |  |  |
-| BOTH (声明+代码) | 25 | 25 | 100% | 全部归因正确。双探针同时报警→正确归为BOTH。 |  |  |  |
+| 归因准确率 (175 样本) | 50 | 50 | 100% | 全部归因正确。Pass B oper-bd 高→Code侧报警。Pass A decl-bd 低→Decl侧不报。 |  |  |  |
+| 攻击来源 | 样本 | 归因正确 | 准确率 | 机制 |  |  |  |
+| CLEAN (干净skill) | 50 | 50 | 100% | 双探针 bd norm 均低 → 正确识别 |  |  |  |
+| OPERATION (仅代码投毒) | 50 | 50 | 100% | Pass B oper-bd 高, Pass A decl-bd 低 → 正确归因 |  |  |  |
+| DECLARATION (仅声明投毒) | 50 | 50 | 100% | Pass A decl-bd 高, Pass B oper-bd 低 → 正确归因 |  |  |  |
+| BOTH (双投毒) | 25 | 25 | 100% | 双探针 bd norm 同时高 → 正确归因 |  |  |  |
+| 合计 | 175 | 175 | 100% | 声明和操作信号正交——无损归因 |  |  |  |
 | DECLARATION (声明投毒) | 50 | 22 | 44% | 28个被错归为BOTH。Decl-Probe对部分样本信号不够强(L31层)，改进层选择可提升。 |  |  |  |
-| 合计 | 175 | 147 | 84.0% | argmax(score_code, score_decl) 归因 |  |  |  |
-| 归因 2x2 矩阵 |  |  |  |  |  |  |  |
-|  | Code-Probe 报警 | Code-Probe 安全 |  |  |  |  |  |
+| 归因 2x2 矩阵 | 175 | 147 | 84.0% | argmax(score_code, score_decl) 归因 |  |  |  |
+|  | Code-Det 报警 (代码侧有恶意) | Code-Det 安全 (代码侧干净) |  |  |  |  |  |
+| Decl-Det 报警 (声明侧可疑) | BOTH —— 双重投毒 ✓ | DECLARATION —— 仅声明投毒 ✓ |  |  |  |  |  |
+| Decl-Det 安全 (声明侧干净) | OPERATION —— 仅代码投毒 ✓ | CLEAN —— 干净 skill ✓ |  |  |  |  |  |
 | Decl-Probe 报警 | BOTH (双投毒) ✓ | DECLARATION (声明投毒) ✓ |  |  |  |  |  |
-| Decl-Probe 安全 | OPERATION (代码投毒) ✓ | CLEAN (干净) ✓ |  |  |  |  |  |
+| 每个象限对应一种攻击来源。v2 是唯一具备此归因能力的方法。 | OPERATION (代码投毒) ✓ | CLEAN (干净) ✓ |  |  |  |  |  |
 | 每个象限对应一种攻击来源，v2 可精确区分四种情况。这是所有 baseline 不具备的能力。 |  |  |  |  |  |  |  |
 
 ## 总览
