@@ -4,19 +4,34 @@
 
 ---
 
-## 1. 问题
+## 1. 问题：Agent Skill 供应链攻击
 
-LLM agent 在执行任务前从远程仓库加载第三方 skill。恶意 skill 可以窃取数据、破坏输出或攻陷环境。唯一可靠的干预点在**加载之后、执行之前**。
+### 攻击面已经存在
 
-现有三类方法各有致命缺陷：
+LLM coding agent（Claude Code、OpenAI Codex、Cursor 等）正快速普及一个能力：从远程仓库加载第三方 **skill**——包含指令、脚本和配置的模块包，为 agent 提供新的工具能力。
 
-| 方法 | 代表工作 | 致命问题 |
-|---|---|---|
-| 静态扫描 | BIV, SkillSieve, cisco-scanner | 读文本 → SkillCloak 混淆后检出率 99%→10% |
-| 沙箱执行 | SkillDetonate | 执行后检测 → 为时已晚，153s/skill |
-| 内部探针 | RouteGuard, AgentLens | 只读单点信号。RouteGuard FNR=45%, AgentLens FNR=55% |
+这创造了一个新的软件供应链攻击面。Skill 以 agent 的完整权限运行——可以读写文件系统、执行 shell 命令、访问网络和环境变量。一个恶意 skill 可以：
 
-**没有方法同时做到：高检测率 + 低误报 + 不执行 + 可归因。**
+- **窃取凭证**：读取 `~/.aws/credentials`、SSH key、环境变量中的 API key，发送到外部服务器
+- **植入后门**：在项目中写入恶意代码、修改 `.bashrc` 实现持久化
+- **破坏输出**：在代码生成中注入漏洞、替换依赖包
+- **劫持 agent 决策**：通过 prompt injection 覆盖用户指令，让 agent 执行攻击者意图
+
+真实案例已经出现：2026 年初，ClawHavoc 攻击在 ClawHub marketplace 植入了 300+ 恶意 skill，伪装成安装前提条件窃取浏览器凭据和加密货币钱包。BIV 对 49,943 个 OpenClaw skill 的扫描发现 80% 的 skill 存在声称-实际行为偏差，5% 携带多阶段攻击链。
+
+### 所有现有方法都漏了点什么
+
+防御工作分为三类，每一类都有无法弥补的缺陷：
+
+| 方法 | 代表工作 | 做什么 | 致命问题 |
+|---|---|---|---|
+| **静态文本扫描** | BIV, SkillSieve, cisco-scanner | 读 SKILL.md 文本，匹配关键词/正则/AST pattern | SkillCloak 混淆后检出率从 99% 跌到 10%——文本可以被改写，行为无法被文本掩盖 |
+| **沙箱动态执行** | SkillDetonate | 在 Docker 里实际执行 skill，用 eBPF 监控 syscall | 执行后才确认恶意——已经晚了。153 秒/skill，无法在线部署 |
+| **内部探针（读 hidden state）** | RouteGuard, AgentLens | 读模型内部 attention/hidden state | 都只读**单点信号**——RouteGuard 读 attention mass shift（FNR=45%），AgentLens 读 boundary token（FNR=55%）。在"声明看不出但实际有毒"的攻击上完全失效 |
+
+### 我们回答的问题
+
+**能不能在 skill 加载后、执行前，通过对模型内部表示的几何分析，同时做到高检测率、低误报、不执行、能归因？**
 
 ---
 
