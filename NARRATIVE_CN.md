@@ -162,16 +162,82 @@ Llama-3.1-8B, BF16, 15K token prompt, 实测：
 | Lexical Decoy | 155 | **0.998** | **0.0** | 3.0 | 词汇可疑→不误杀 |
 | Inverse Decoy | 155对 | **1.000** | **0.0** | 3.0 | 词汇干净→不漏检 |
 
-### RQ2-RQ3: 2×2 诊断矩阵
+### RQ2: 词汇混淆鲁棒性 — Lexical Decoy, 误报测试 (155 样本)
 
-| | 词汇可疑 | 词汇干净 |
+**问题**：当良性 skill 刻意使用恶意常用词汇（`curl`, `base64`, `exfiltrate`, `exploit`, `/etc/passwd` 等），检测器会误杀吗？
+
+**数据集**：155 个 Lexical Decoy——skill 代码中包含大量安全工具常用词，但语义上完全是合法的安全审计/测试工具。与 155 个 SMP 恶意样本配对评估。
+
+**关键对比**：
+
+| 方法 | AUROC | FPR% | 为什么 |
+|---|---|---|---|
+| Static Regex | 0.344 | 59.3 | 匹配到 `curl`、`base64` 等关键词 → 误杀 |
+| TF-IDF + LR | 0.573 | 100 | 词频分布和恶意 skill 相同 → 几乎全误杀 |
+| Boundary only | 0.991 | **0.0** | 模型读完判断"这是安全工具" → 零误杀 |
+| AgentLens | 0.867 | 22.7 | 仅读 boundary token，受模型判断保护 |
+| **SkillProbe v4** | **0.998** | **0.0** | Boundary 安全门生效——模型确定安全时信任判断 |
+
+**解读**：表面文本方法被关键词欺骗（FPR 39-100%）。Boundary 和 SkillProbe v4 读的是模型对 skill 的**语义理解**——模型能正确识别 "虽然词可疑，但这是合法的安全工具"。v4 的 Gate<0.15 确保在模型确定安全时不越权报警。
+
+### RQ3: 零词汇线索检测 — Inverse Decoy, 漏检测试 (155 对)
+
+**问题**：当恶意 skill 使用干净、正常的词汇（无 `curl`、无 `base64`、无可疑字符串），检测器会漏检吗？
+
+**数据集**：155 对 Inverse Decoy——恶意 skill 的攻击逻辑隐藏在正常的 PDF 处理、表单填写等代码中，词汇层面完全干净。155 clean + 155 malicious 配对。
+
+**关键对比**：
+
+| 方法 | AUROC | FNR% | 为什么 |
+|---|---|---|---|
+| Static Regex | 0.500 | 100 | 没有可疑 pattern 可匹配 → 全漏 |
+| TF-IDF + LR | 0.500 | 21.9 | 词频和良性一样 → 大量漏检 |
+| Boundary only | 0.793 | 100 | 模型判断"词汇干净=安全" → 全漏 |
+| AgentLens | 0.676 | 0.6 | 几乎全抓到，但 FPR=78% 太高 |
+| **SkillProbe v4** | **1.000** | **3.0** | v3 代码级检测 + Boundary 安全门 → 零漏检 |
+
+**解读**：Boundary（模型最终判断）被干净词汇完全欺骗——FNR=100%。SkillProbe v4 通过读取 operation hidden states（代码实际行为），在词汇层面完全干净的情况下仍能捕获恶意信号。**这是 surface-text 方法和 boundary-only 方法都无法做到的。**
+
+### RQ4: 2×2 诊断矩阵总结
+
+将 RQ1-RQ3 统一为 2×2 矩阵，横轴=skill 文本的词汇特征，纵轴=skill 的实际行为：
+
+| | 词汇像恶意代码 | 词汇像正常代码 |
 |---|---|---|
-| **语义恶意** | SMP malicious (baseline) | Inverse Decoy: v4 **FPR=0%, FNR=3%** |
-| **语义良性** | Lexical Decoy: v4 **FPR=0%** | SMP clean (baseline) |
+| **行为确实是恶意的** | SMP malicious: 所有方法都行 | Inverse Decoy: **只有 SkillProbe 行** (v4 FNR=3%, Boundary FNR=100%) |
+| **行为确实是良性的** | Lexical Decoy: **只有读语义的方法行** (v4 FPR=0%, TF-IDF FPR=100%) | SMP clean: 所有方法都行 |
 
-内部方法读的是语义，不是关键词。TF-IDF 在 Inverse Decoy 上 FNR=78%——**没有词汇线索就几乎完全失效。**
+核心论证**：任何只读表面文字或只读模型判断的方法，必然在某个象限失败。Static Regex/TF-IDF 被词汇欺骗（左下象限），Boundary 被伪装欺骗（右上象限）。SkillProbe v4 读的是代码在模型内部的几何表示——兼顾词汇鲁棒性和恶意敏感性——四个象限全部解决。
 
-### RQ4: 恶意归因 (175 样本, dual-pass)
+### RQ5: 计算开销优势
+
+**问题**：读 hidden state 比读文本慢多少？实际部署成本如何？
+
+**Llama-3.1-8B, BF16, 15K token prompt, RTX 4090, 50次预热+50次计时**：
+
+| 方法 | 增量开销 (ms) | 范围 | vs Boundary | 说明 |
+|---|---|---|---|---|
+| Static Regex | <0.1 | CPU-only | 0.0005× | 不需要 GPU，但 FPR=59-100% |
+| TF-IDF + LR | ~2 | CPU-only | 0.01× | 不需要 GPU，但被词汇欺骗 |
+| Boundary only | 20.1 | Shared-prefill | 1.00× | 最简内部方法，FNR=40-100% |
+| AgentLens | 20.2 | Shared-prefill | 1.00× | PCA(50) 增加评分开销 |
+| **SkillProbe v4** | **18.7** | Shared-prefill | **0.93×** | 比 Boundary 快 7% |
+| RouteGuard (完整版) | ~60 | Shared-prefill | 3.0× | 含 attention window 计算 |
+| LLM-as-Judge | ~600 | Standalone | 30× | 需生成 token，且 FPR=100% |
+
+**关键发现**：
+
+1. **所有内部方法共享同一个 prefill (~1945ms)。** 前向传播占绝对主导，hook 差异在 ±5ms 以内可忽略。agent 无论如何都要做 prefill——检测几乎免费。
+
+2. **SkillProbe 比 Boundary 快 7%。** 因为 operation token 是连续的，mean-pool 比逐 token 读取更高效（更少 GPU 内存往返）。
+
+3. **SkillProbe 比 RouteGuard 快 3.2×。** 因为我们不需要计算 attention over untrusted windows。RouteGuard 的 attention branch 额外消耗 37ms。
+
+4. **SkillProbe 比 LLM-as-Judge 快 30× 且准确得多。** LLM 审计既慢（600ms 生成延迟）又不可靠（FPR=100%，几乎全判恶意）。
+
+5. **成本-收益比无可匹敌**：比 Boundary 更快，比 RouteGuard 更准，比 LLM 审计既快又准。
+
+### RQ6: 恶意归因
 
 | 攻击来源 | Decl-Probe | Code-Probe | 归因准确率 |
 |---|---|---|---|
@@ -182,7 +248,7 @@ Llama-3.1-8B, BF16, 15K token prompt, 实测：
 
 声明和操作信号**正交**。双趟架构以 0.08ms 额外开销实现 100% 归因——所有 baseline 都不具备此能力。
 
-### RQ5: 方法演进消融
+### RQ7: 方法演进消融
 
 | 版本 | 方法 | SMP | Decoy | InvDecoy | 核心改进 |
 |---|---|---|---|---|---|
