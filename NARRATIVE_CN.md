@@ -101,6 +101,20 @@ attribution = argmax → CODE / DECL / BOTH / CLEAN  (100% 准确)
 
 **SkillProbe 是唯一同时做到"不执行、不单独前向、不调外部 API"的方法。** 其他方法要么需要独立的 LLM 调用（BIV, LLM-as-Judge），要么需要独立沙箱（SkillDetonate），要么需要独立前向（任何离线特征提取方案）。我们利用 agent 已有的计算——检测几乎是免费的。
 
+### 训练协议与术语
+
+**选层**：dev (360) 按 pair 做 group-aware 5-fold CV（同一对 clean/malicious 不跨折）。每层训 4 折、验 1 折，轮 5 圈取平均 OOF AUROC。L7+ 范围最高层当选。
+
+**定阈值**：选中层后 dev 全量训练，扫 0.05-0.95 阈值，F1 最高者冻结。test 上只用此阈值算 FPR/FNR，不回调。
+
+**最终评估**：dev 全量拟合 StandardScaler + PCA(8) + LR(C=0.01)，sealed test 上一次确认。
+
+**术语**：
+- **CV**：数据切 5 份轮换验证，防单次划分碰运气
+- **StandardScaler**：特征缩放到均值 0、标准差 1，防大数值特征主导
+- **PCA(8)**：4098 维 → 8 维，保留主变异方向。消融证 8 维最优，再多过拟合
+- **LR (C=0.01)**：线性分类器输出 0-1 恶意分数。C 越小正则越强
+
 ---
 
 ## 3. 实验结果
