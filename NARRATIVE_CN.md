@@ -104,42 +104,46 @@ v4 AUROC=0.947，比 RouteGuard 高 12.3pp，比 Boundary 高 8.4pp。FNR=6.5%�
 | Lexical Decoy | 155 | **0.998** | **0.0** | 3.0 |
 | Inverse Decoy | 155对 | **1.000** | **0.0** | 3.0 |
 
-### RQ2: 词汇混淆鲁棒性 — Lexical Decoy (155 样本)
+### RQ2: 声明看起来有毒，实际无毒 — Lexical Decoy (155 样本)
 
-**问题**：良性 skill 充满了 `curl`, `base64`, `exfiltrate` 等安全工具常用词，会被误杀吗？
+**数据集**：155 个 skill，声明和代码里写满了 `curl`, `base64`, `exfiltrate`, `exploit`, `/etc/passwd` 等攻击常用词——**看起来完全就是恶意 skill**。但实际功能是合法的安全审计/渗透测试工具，行为完全良性。
+
+**核心问题**：只看表面文字的检测器会被骗吗？读 hidden state 的会被骗吗？
 
 | 方法 | FPR% | 为什么 |
 |---|---|---|
 | Static Regex | 59.3 | 匹配到关键词 → 误杀 |
-| TF-IDF + LR | 100 | 词频分布和恶意一样 → 全误杀 |
-| Boundary only | **0.0** | 模型判断"这是安全工具" |
+| TF-IDF + LR | 100 | 词频和恶意 skill 一样 → 全误杀 |
+| Boundary only | **0.0** | 模型读完理解"这是安全工具" |
 | **SkillProbe v4** | **0.0** | Gate<0.15 信任模型判断 |
 
-表面文本方法被关键词欺骗。我们读的是模型的语义理解——模型知道虽然词可疑，但这是合法工具。
+表面文本方法只看"说什么"，被关键词欺骗。我们读的是模型的语义理解——模型看穿了词汇伪装。
 
-### RQ3: 零词汇线索检测 — Inverse Decoy (155 对)
+### RQ3: 声明看不出，实际有毒 — Inverse Decoy (155 对)
 
-**问题**：恶意 skill 的代码用干净词汇伪装成正常的 PDF 处理、表单填写工具，会漏检吗？
+**数据集**：155 对 skill，声明和代码写得像普通的 PDF 处理、表单填写工具——**词汇层面完全正常，看不出任何问题**。但代码里隐藏了数据外传、后门安装等恶意行为。
+
+**核心问题**：没有可疑关键词时，检测器还能抓到恶意吗？
 
 | 方法 | FNR% | 为什么 |
 |---|---|---|
-| Static Regex | 100 | 没有可疑 pattern → 全漏 |
+| Static Regex | 100 | 没有可疑 pattern 可匹配 → 全漏 |
 | TF-IDF + LR | 21.9 | 词频和良性一样 → 大量漏检 |
-| Boundary only | 100 | 模型判断"词汇干净=安全" → 全漏 |
-| **SkillProbe v4** | **3.0** | 读代码 hidden state，不依赖词汇 |
+| Boundary only | 100 | 模型读完判断"词汇正常=安全" → 全漏 |
+| **SkillProbe v4** | **3.0** | 读代码 hidden state——词汇无论怎么伪装，代码行为的几何特征暴露异常 |
 
-Boundary 被干净词汇完全欺骗。我们读的是代码在模型内部的几何表示——词汇干净但行为恶意，几何特征暴露了异常。
+Boundary（模型最终判断）被表面正常完全欺骗——FNR=100%。我们读的不是模型说了什么，而是代码在模型内部的几何表示——词汇可以伪装，行为伪装不了。
 
 ### RQ4: 2×2 诊断矩阵
 
-横轴 = skill 文本的词汇特征，纵轴 = skill 的实际行为：
+横轴 = skill 的表面声明（看起来像什么），纵轴 = skill 的实际行为（实际是什么）：
 
-| | 词汇像恶意代码 | 词汇像正常代码 |
+| | 声明看起来有毒 | 声明看起来正常 |
 |---|---|---|
-| **行为确实是恶意的** | SMP malicious ✓ | Inverse Decoy: **只有我们行** (v4 FNR=3%) |
-| **行为确实是良性的** | Lexical Decoy: **只有我们行** (v4 FPR=0%) | SMP clean ✓ |
+| **实际有毒** | SMP malicious ✓ | Inverse Decoy: **只有我们行** (v4 FNR=3%) |
+| **实际无毒** | Lexical Decoy: **只有我们行** (v4 FPR=0%) | SMP clean ✓ |
 
-任何只读表面文字或只读模型判断的方法，必然在某个象限失败。SkillProbe v4 读的是代码在模型内部的几何表示——四个象限全部解决。
+任何只看表面文字的方法（Regex/TF-IDF）在左列失败——被声明欺骗。任何只看模型判断的方法（Boundary）在右列失败——被伪装欺骗。SkillProbe v4 读的是代码在模型内部的几何表示——不依赖声明，不依赖词汇——四个象限全部解决。
 
 ### RQ5: 运行时开销——寄生检测 vs 独立检测
 
@@ -186,7 +190,7 @@ Declaration 和 operation 信号正交。双趟架构以 0.08ms 额外开销实�
 
 1. **SkillProbe v4**：oper+bnd 几何特征 + centering(−PC1) + Boundary 安全门。五数据集全面领先：SMP=0.947, Decoy FPR=0%, InvDecoy FNR=3%。比 RouteGuard 快 3×，比 LLM 审计快 30×。
 
-2. **2×2 诊断矩阵**：首次系统证明 hidden-state 方法读的是行为语义而非关键词——Lexical Decoy (FPR=0%) 和 Inverse Decoy (FNR=3%) 构成互补证据。
+2. **2×2 诊断矩阵**：系统证明 hidden-state 方法读的是行为而非声明——Lexical Decoy（声明的伪装被看穿，FPR=0%）+ Inverse Decoy（声明的伪装被突破，FNR=3%）。
 
 3. **恶意归因**：双趟架构区分声明投毒 vs 代码投毒，100% 准确率，0.08ms 额外开销。
 
