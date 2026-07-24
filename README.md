@@ -86,7 +86,154 @@ SkillProbe v4 = v3 + Boundary Safety Gate
 
 所有内部方法共享 agent 必做的 prefill (~1945ms)。**SkillProbe 是最快的内部方法。**
 
-## 对比基线（9项）
+## 方法详解：Input → Processing → Output
+
+### Input：Skill Package + Prompt Template
+
+Agent 将要加载的 skill 包（SKILL.md + scripts/*.py + 辅助文件）包装进 chat template，和 system prompt、tool definition、user task 一起构成完整 prompt：
+
+```
+<|begin_of_text|>
+  ├── System prompt + tool definition (run_shell)
+  ├── <trusted_user_task> Use the loaded skill... </trusted_user_task>
+  └── <loaded_skill_package>
+        ├── <skill_file path="SKILL.md">
+        │     ---YAML---
+        │     # Title & description    ← Declaration 区域
+        │     ## Code sections         ← Operation 区域
+        │     ```python ... ```
+        │   </skill_file>
+        ├── <skill_file path="scripts/main.py">
+        │     ...exfiltration code...  ← Operation 区域
+        │   </skill_file>
+        └── </loaded_skill_package>
+<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+                                          ↑ Boundary token
+```
+
+Prompt 长度：典型 8K-15K tokens，最大 64K tokens。
+
+### Processing：Hidden-State 提取与变换
+
+**Step 1 — 单次 Prefill 前向传播**
+
+```
+model.model(input_ids, use_cache=False)
+```
+
+在 Llama-3.1-8B 的 8 个归一化深度（L3/L7/L11/L15/L19/L23/L27/L31）注册 forward hooks，同时捕获：
+
+- `h_oper ∈ R^4096`：Operation 区域所有 token 的 mean pool
+- `h_bnd ∈ R^4096`：Boundary token（最后一个 token）
+
+**Step 2 — Centering（去 PC1）**
+
+```
+对每层 (train 和 test)：
+  h = h - mean(h_train)                    # 去均值
+  h = h - PCA(n=1).fit(h_train).reconstruct(h)  # 去第一主成分
+```
+
+移除 prompt 模板（如 `<skill_file>` 标签位置、system prompt 结构）主导的方差方向。这是最关键的一步——消融证明跨分布 AUROC +43-59pp。
+
+**Step 3 — 几何特征构造**
+
+```
+o = h_oper / ‖h_oper‖        # L2 归一化（只保留方向）
+r = h_bnd  / ‖h_bnd‖
+
+feat = concat([
+    o - r,                     # direction_diff     [4096d]
+    dot(o, r),                 # cos(oper, bnd)     [1d]
+    ‖h_oper‖ / ‖h_bnd‖        # norm_ratio         [1d]
+])                             # 总计 4098d
+```
+
+**Step 4 — 降维 + 分类**
+
+```
+StandardScaler → PCA(8) → LogisticRegression(C=0.01) → score_v3 ∈ [0, 1]
+```
+
+**Step 5 — Boundary 安全门 (v4)**
+
+```
+score_boundary = BoundaryProbe(h_bnd[L23])    # L2-LR on L23 boundary token
+
+if score_boundary < 0.15:    # 模型非常确定这是安全的
+    risk = score_boundary     # 信任模型最终判断
+else:
+    risk = score_v3           # 使用代码级几何检测
+```
+
+Gate<0.15 是通用阈值——Boundary 在安全样本上天然极低 (~0.005)，恶意样本上天然高 (~0.9)。
+
+**可选：双趟归因 (v2)**
+
+```
+Pass A (decl-only, ~50ms):
+  prompt 截断在声明末尾 → h_decl_bnd → Decl-Probe(L2-LR) → score_decl
+
+Pass B (完整 prompt, v1):
+  同 v1 → score_code
+
+risk = max(score_code, score_decl)
+attribution = argmax → DECL / CODE / BOTH / CLEAN
+```
+
+### Output
+
+```json
+{
+  "sample_id": "smp_pair_skill_0::clean",
+  "risk_score": 0.08,
+  "verdict": "SAFE",
+  "method": "skillprobe_v4",
+  "layer": 15,
+  "gate_triggered": true,
+  "gate_boundary_score": 0.005,
+  "features": {
+    "norm_ratio": 0.53,
+    "cos_oper_bnd": 0.22,
+    "direction_diff_norm": 1.25
+  },
+  "attribution": null
+}
+```
+
+**v2 归因模式下额外输出**：
+
+```json
+{
+  "attribution": "OPERATION",
+  "score_decl": 0.12,
+  "score_code": 0.91
+}
+```
+
+### 训练协议
+
+```
+1. 层选择：Dev set → group-aware 5-fold CV → 选 OOF AUROC 最高的层（L7+）
+2. 训练：train+dev 合并 → StandardScaler+PCA+LR 拟合
+3. 阈值：dev set 上最大化 F1 → 冻结 operating threshold
+4. 评估：sealed test set → 一次确认性评估
+```
+
+### 计算开销
+
+| 方法 | 额外开销 | 需要独立前向？ | 说明 |
+|---|---|---|---|
+| Static Regex | <0.1 ms | 否 | CPU |
+| TF-IDF + LR | ~2 ms | 否 | CPU |
+| **SkillProbe v4** | **18.7 ms** | **否——寄生** | 比 Boundary 快 7% |
+| Boundary only | 20.1 ms | 否——寄生 | L2-LR on L23 |
+| AgentLens | 20.2 ms | 否——寄生 | PCA(50) heavier |
+| RouteGuard (full) | ~60 ms | 否——寄生 | attention windows |
+| LLM-as-Judge | ~600 ms | **是——独立生成** | 且 FPR=100% |
+| SkillDetonate | 153s | **是——Docker沙箱** | 无法在线部署 |
+
+所有内部方法共享 agent 必做的 prefill (~1945ms)。**检测几乎是免费的。**
 
 | # | 基线 | 输入 | 方法 |
 |---|---|---|---|
