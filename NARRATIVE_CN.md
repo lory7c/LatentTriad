@@ -18,7 +18,7 @@ LLM coding agent（Claude Code、OpenAI Codex 等）正快速普及第三方 ski
 |---|---|---|
 | **静态扫描** (BIV, cisco-scanner) | 读文本，匹配关键词/AST pattern | SkillCloak 混淆后检出率 99%→10%——文本可改写 |
 | **沙箱执行** (SkillDetonate) | Docker+eBPF 实际执行，监控 syscall | 执行后确认→为时已晚。153s/skill，无法在线 |
-| **内部探针** (RouteGuard, AgentLens) | 读模型 attention/hidden state | 只读**单点信号**。RouteGuard 读 attention shift (FNR=45%)，AgentLens 读 boundary token (FNR=55%)。在"声明看不出但实际有毒"的攻击上完全失效 |
+| **内部探针** (RouteGuard, AgentLens) | RouteGuard: attention+hidden 双专家融合。AgentLens: boundary top-K | 都只捕捉**单一视角**——RouteGuard 测量 response-to-untrusted window 的对齐度（FNR=45%），AgentLens 只看 boundary token（FNR=55%）。两者都缺乏对 skill 代码内容和模型准备行动前状态之间**几何关系**的刻画。在"声明看不出但实际有毒"的攻击上，模型的 attention 分布和 boundary 判断均被干净词汇欺骗 |
 
 ### 1.3 我们发现：恶意 Skill 在 Hidden Space 中留下几何指纹
 
@@ -32,7 +32,7 @@ LLM coding agent（Claude Code、OpenAI Codex 等）正快速普及第三方 ski
 
 我们称这个现象为 **"准备-警觉效应"（Pre-Action Vigilance）**：模型在读完恶意代码后，boundary token 变得更加"警觉"——它在准备行动前表达了更大的不确定性和敏感性。这种效应在 L7-L15 中层最强，到 L27+ 衰减——说明它是模型在语义理解阶段产生的，而非表面 token 处理。
 
-这和 RouteGuard 发现的 "attention hijacking" 是互补信号：他们读的是"模型在看哪里"，我们读的是"模型看完后的状态变化"。
+这和 RouteGuard 发现的 "attention hijacking" 是互补信号：他们读的是"模型在看哪里"（attention shift），我们读的是"模型看完后的状态变化"（几何张力）。两者都是 hidden-state 内部的真实效应，但刻画了不同的维度。
 
 ### 1.4 从这个 insight 出发，SkillProbe 做什么
 
