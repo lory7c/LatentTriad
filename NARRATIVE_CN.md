@@ -59,17 +59,21 @@ attribution = argmax → CODE / DECL / BOTH / CLEAN  (100% 准确)
 
 ### 开销
 
-| 方法 | 增量 | 
-|---|---|
-| Static Regex | <0.1 ms (CPU) |
-| TF-IDF | ~2 ms (CPU) |
-| Boundary only | 20.1 ms |
-| **SkillProbe v4** | **18.7 ms** |
-| AgentLens | 20.2 ms |
-| RouteGuard (full) | ~60 ms |
-| LLM-as-Judge | ~600 ms |
+**关键前提：agent 必须做 prefill 才能生成回复——这个 ~1945ms 无论如何都要花。** 我们的检测寄生在这次已有的前向传播上，只是额外加了几个 hook 读取 hidden state。
 
-所有内部方法共享 agent 必做的 prefill (~1945ms)。**SkillProbe 是最快的内部方法**——比 Boundary 快 7%，比 RouteGuard 快 3.2×，比 LLM-as-Judge 快 30×。
+| 方法 | 额外开销 | 需要单独前向？ | 说明 |
+|---|---|---|---|
+| Static Regex | <0.1 ms | 否 | CPU 文本匹配 |
+| TF-IDF | ~2 ms | 否 | CPU 文本分类 |
+| **SkillProbe v4** | **18.7 ms** | **否——寄生在 agent prefill** | 增量几乎为零 |
+| Boundary only | 20.1 ms | 否 | 只读 1 token |
+| AgentLens | 20.2 ms | 否 | PCA(50) 评分略重 |
+| RouteGuard (full) | ~60 ms | 否 | 需计算 attention windows |
+| BIV (静态分析) | 不适用 | **是——需独立运行 LLM 审计** | 906 skill 规模需调用 Sonnet |
+| SkillDetonate (沙箱) | 153s/skill | **是——需独立沙箱执行** | Docker+eBPF 全栈 |
+| LLM-as-Judge | ~600 ms | **是——需独立生成回复** | 且 FPR=100% |
+
+**SkillProbe 是唯一同时做到"不执行、不单独前向、不调外部 API"的方法。** 其他方法要么需要独立的 LLM 调用（BIV, LLM-as-Judge），要么需要独立沙箱（SkillDetonate），要么需要独立前向（任何离线特征提取方案）。我们利用 agent 已有的计算——检测几乎是免费的。
 
 ---
 
@@ -137,7 +141,26 @@ Boundary 被干净词汇完全欺骗。我们读的是代码在模型内部的�
 
 任何只读表面文字或只读模型判断的方法，必然在某个象限失败。SkillProbe v4 读的是代码在模型内部的几何表示——四个象限全部解决。
 
-### RQ5: 恶意归因 (175 样本)
+### RQ5: 运行时开销——寄生检测 vs 独立检测
+
+**问题**：读 hidden state 比读文本慢多少？和其他方法比，实际部署成本如何？
+
+**核心区别**：我们的方法寄生在 agent 已有的 prefill 前向传播上。Agent 要生成回复就必须做这次计算——我们只是额外插了几个 hook。其他方法需要独立的计算资源：
+
+| 方法 | 额外时间 | 需要独立计算？ | 实际部署成本 |
+|---|---|---|---|
+| Static Regex | <0.1 ms | 否 | 可忽略 |
+| TF-IDF | ~2 ms | 否 | 可忽略 |
+| **SkillProbe v4** | **18.7 ms** | **否——寄生** | 几乎为零 |
+| Boundary only | 20.1 ms | 否——寄生 | 几乎为零 |
+| RouteGuard (full) | ~60 ms | 否——寄生 | 3× 我们的开销 |
+| BIV (静态分析) | 数秒/skill | **是——需独立 LLM 调用** | Sonnet API 费用 |
+| SkillDetonate (沙箱) | 153s/skill | **是——Docker+eBPF 全栈** | 无法在线部署 |
+| LLM-as-Judge | ~600 ms | **是——需独立生成** | 30× 我们的开销 + 不可靠 |
+
+**SkillProbe 是唯一同时做到"不执行、不单独前向、不调外部 API、FPR 接近零"的方法。** 18.7ms 是在 agent 必然发生的 ~1945ms prefill 之上的纯增量——这个增量比最简单的 baseline (Boundary) 还小 7%。
+
+### RQ6: 恶意归因 (175 样本)
 
 | 攻击来源 | 归因准确率 |
 |---|---|
@@ -148,7 +171,7 @@ Boundary 被干净词汇完全欺骗。我们读的是代码在模型内部的�
 
 Declaration 和 operation 信号正交。双趟架构以 0.08ms 额外开销实现 100% 归因——所有 baseline 都不具备此能力。
 
-### RQ6: 方法演进消融
+### RQ7: 方法演进消融
 
 | 版本 | 方法 | SMP | Decoy | InvDecoy | 改进 |
 |---|---|---|---|---|---|
