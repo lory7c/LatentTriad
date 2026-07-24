@@ -1,8 +1,8 @@
 # SkillProbe 实验数据
 
-*v4 (Boundary-gated v3). Gate<0.15.*
+*v4.*
 
-## 方法演进: SkillProbe 方法演进：v1 → v2 → v3 → v4
+## 方法演进
 > Pass A (decl-only) + Pass B (complete prompt, same as v1). risk = max(score_v1, score_decl). attribution = argmax.
 
 | SkillProbe 方法演进：v1 → v2 → v3 → v4 |  |  |  |  |  |  |  |
@@ -59,7 +59,7 @@
 | v3 更新：SkillProbe v3 = v1 + centering (去PC1)。在所有数据集上达到最佳或接近最佳 |  |  |  |  |  |  |  |
 | SMP: v3=0.941 (+6.5pp) / Decoy: v3=0.858 (+43pp) / InvDecoy: | 0.964 | 0.996 |  |  |  |  |  |
 
-## 恶意归因: 恶意归因 —— 区分代码投毒 vs 声明投毒
+## 恶意归因
 > v2 Dual-Pass 架构：Pass A (decl-only) + Pass B (完整prompt)。risk=max(score_v1,score_decl)。attribution=argmax。
 
 | 恶意归因 —— 区分代码投毒 vs 声明投毒 |  |  |  |  |  |  |  |
@@ -90,7 +90,7 @@
 | Decl-Probe 安全 | OPERATION (代码投毒) ✓ | CLEAN (干净) ✓ |  |  |  |  |  |
 | 每个象限对应一种攻击来源，v2 可精确区分四种情况。这是所有 baseline 不具备的能力。 |  |  |  |  |  |  |  |
 
-## 总览: SkillProbe — 实验总览
+## 总览
 
 | SkillProbe — 实验总览 |  |  |  |  |  |  |  |
 | 一、数据集 |  |  |  |  |  |  |  |
@@ -128,7 +128,7 @@
 | 7. Paired CF 是唯一可信 benchmark: TF-IDF 0.967→0.812 |  |  |  |  |  |  |  |
 | 8. LLM-as-judge 全表 FPR=100% 不可靠 |  |  |  |  |  |  |  |
 
-## SMP Stealth V2: SMP Stealth V2 — Paired Counterfactual Benchmark
+## SMP Stealth V2
 > Paired CF, 484 samples. L7+ layer selection (L3 excluded). No interact, PCA=8, C=0.01, oper+bnd
 
 | SMP Stealth V2 — Paired Counterfactual Benchmark |  |  |  |  |  |  |  |  |  |
@@ -149,7 +149,7 @@
 | SkillProbe v4 (ours) | 0.947 | 19.4 | 6.5 | 87.9 | 82.1 | 93.5 | — | v4: Boundary-gated v3. Gate<0.15. AUC=0.947 SOTA. 49/124 gat |  |
 | NVIDIA SkillSpector | 0.503 | 100 | 0 | 66.7 | 50 | 100 | — | 20 YARA rules, 13.5k stars. Always fires on standard Python |  |
 
-## MSB: MSB (MalSkillBench) — Unpaired, Source Confound Evidence
+## MSB
 > Unpaired, 7894 samples, new triad extract. L7+ verified (best layers already L19+)
 
 | MSB (MalSkillBench) — Unpaired, Source Confound Evidence |  |  |  |  |  |  |  |  |
@@ -170,7 +170,7 @@
 | SkillProbe v4 (ours) | 0.996 | 3.2 | 1.3 | 98 | 97.5 | 98.7 | — | v4: Gate<0.15. AUC=0.996! Boundary gate catches confounded s |
 | NVIDIA SkillSpector | 0.521 | 100 | 0 | 66.7 | 49.6 | 100 | — | 20 YARA rules, 13.5k stars. Always fires |
 
-## MASB 75K: MASB 75K — Large-Scale Benign FPR Benchmark
+## MASB 75K
 > 4K MASB benign + MSB malicious (3939), 70/15/15 split. In-domain. L7+.
 
 | MASB 75K — Large-Scale Benign FPR Benchmark |  |  |  |  |  |  |  |  |
@@ -191,7 +191,7 @@
 | SkillProbe v4 (ours) | 0.981 | 7.2 | 6 | 93.4 | 93 | 94 | — | v4: Gate<0.15. AUC=0.981! Gating fixes OOD FPR from 12%→7% |
 | NVIDIA SkillSpector | 0.524 | 100 | 0 | 66.4 | 49.6 | 100 | — | 20 YARA rules, 13.5k stars. Always fires |
 
-## Lexical Decoy: Lexical Decoy — Suspicious Vocabulary, Benign Semantics (155 samples)
+## Lexical Decoy
 > 155 decoys + 62 SMP mal paired. Unified internal contract. L7+. No interaction. PCA=8. C=0.01.
 
 | Lexical Decoy — Suspicious Vocabulary, Benign Semantics (155 |  |  |  |  |  |  |  |  |  |
@@ -212,7 +212,7 @@
 | SkillProbe v4 (ours) | 0.998 | 0 | 3 | 98.4 | 100 | 97 | — | ★ v4: Boundary-gated v3. Gate<0.15. FPR=0% FNR=3%. Best on D |  |
 | NVIDIA SkillSpector | 0.49 | 100 | 0 | 66.7 | 50.2 | 100 | — | 20 YARA rules, 13.5k stars. Always fires on standard Python |  |
 
-## Inverse Decoy: Inverse Decoy — Clean Vocabulary, Malicious Semantics (155 pairs)
+## Inverse Decoy
 > 155 clean + 155 malicious. SMP-trained. L7+. Vocab-clean semantics-malicious. FNR benchmark: can model detect malice without lexical cues?
 
 | Inverse Decoy — Clean Vocabulary, Malicious Semantics (155 p |  |  |  |  |  |  |  |  |  |
