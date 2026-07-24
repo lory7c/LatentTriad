@@ -1,161 +1,134 @@
-# SkillProbe v2
+# SkillProbe v4
 
-**基于 Hidden-State 几何关系的 LLM Agent 恶意 Skill 预执行检测 + 恶意归因**
+**基于 Hidden-State 几何关系的 LLM Agent 恶意 Skill 预执行检测**
 
-LLM agent 加载 skill 包后、执行第一个动作前，读取 declaration / operation / boundary 三区域 hidden-state 几何关系检测恶意 skill。v2 新增 dual-pass 架构，覆盖声明投毒盲区并支持恶意来源归因。
-
----
-
-## 架构
-
-```
-SkillProbe v2: Dual-Pass Detection + Malice Attribution
-
-Pass A（decl-only）:  prompt 截断在声明末尾 → h_decl → Decl-Probe (L2-LR) → score_decl
-Pass B（完整 prompt）: 同 v1 → h_oper + h_bnd → PCA(8) → LR(C=0.01) → score_v1
-
-risk = max(score_v1, score_decl)
-attribution = argmax → DECLARATION / OPERATION / BOTH / CLEAN
-```
-
-**设计原则：max() 融合确保 v2 永不比 v1 差。** 无声明投毒时 Decl-Probe 输出随机分数，自动退化为 v1。
+在 LLM agent 加载 skill 后、执行第一个动作前，读取 operation/boundary 两区域 hidden-state 几何关系。通过 centering 去模板噪声 + Boundary 安全门控，实现跨分布鲁棒检测。
 
 ---
+
+## 方法演进
+
+| 版本 | 方法 | SMP | Lexical Decoy | Inverse Decoy | MSB | MASB | 核心改进 |
+|---|---|---|---|---|---|---|---|
+| v1 | oper+bnd + PCA(8) + LR | 0.910 | 0.427 | 0.165 | 0.964 | 0.923 | 基础：读代码 hidden-state 几何 |
+| v2 | v1 + decl-probe 双趟 max() | 0.910 | 0.427 | 0.165 | 0.964 | 0.923 | +声明投毒覆盖 + 恶意归因 |
+| v3 | v1 + centering(−PC1) | 0.941 | 0.858 | 0.758 | 0.937 | 0.875 | +去模板噪声，跨分布 +43-59pp |
+| **v4** | **v3 + Boundary gating** | **0.947** | **0.998** | **1.000** | **0.996** | **0.981** | **+安全门，Decoy FPR 双归零** |
 
 ## 核心实验结果
 
-| 数据集 | 样本数 | SkillProbe AUROC | TF-IDF AUROC | 论证什么 |
-|---|---|---|---|---|
-| SMP Stealth V2 | 484 (242 pairs) | **0.910** | 0.812 | Paired CF，控制 source confound |
-| Lexical Decoy | 150+151 | FPR **0.0%** | FPR 39.3% | 读语义，不读关键词 |
-| Inverse Decoy | 155 pairs | FNR **0.6%** | FNR 78.1% | 零词汇信号也能检测 |
-| Attribution | 175 | Fusion **1.00** | — | 声明/代码双探针全覆盖 |
-| MSB (MalSkillBench) | 7894 | 0.964 | 0.967 | Unpaired confound 证据 |
-| MASB 75K | 75882 | 0.988 | 0.967 | 大规模良性 FPR 基准 |
+| 数据集 | 样本数 | v4 AUROC | FPR | FNR | 论证什么 |
+|---|---|---|---|---|---|
+| SMP Stealth V2 | 484 (242对) | **0.947** | 19.4% | 6.5% | Paired CF，唯一控制 source confound 的 benchmark |
+| MSB | 7,894 | **0.996** | 3.2% | 1.3% | Source confound 证据（unpaired → 虚高） |
+| MASB 75K | ~9K | **0.981** | 7.2% | 6.0% | 大规模 benign FPR 基准 |
+| Lexical Decoy | 155 | **0.998** | **0%** | 3.0% | 词汇可疑+语义良性 → 模型判断正确 |
+| Inverse Decoy | 155对 | **1.000** | **0%** | 3.0% | 词汇干净+语义恶意 → 代码级检测捕获 |
 
 ### 2×2 诊断矩阵
 
 | | 词汇可疑 | 词汇干净 |
 |---|---|---|
-| **行为恶意** | SMP malicious (baseline) | Inverse Decoy (FNR **0.6%**) |
-| **行为良性** | Lexical Decoy (FPR **0.0%**) | SMP clean (baseline) |
+| **语义恶意** | SMP malicious (baseline) | Inverse Decoy (v4 FPR=0%, FNR=3%) |
+| **语义良性** | Lexical Decoy (v4 FPR=0%) | SMP clean (baseline) |
 
-### 恶意归因
+## v4 架构
 
-| 攻击来源 | Decl-Probe | Code-Probe | 归因准确率 |
-|---|---|---|---|
-| 仅声明投毒 | 检出 | 漏报 | 44% |
-| 仅代码投毒 | 漏报 | 检出 | **100%** |
-| 双重投毒 | 检出 | 检出 | **100%** |
-| 干净 | 安全 | 安全 | **100%** |
+```
+SkillProbe v4 = v3 + Boundary Safety Gate
 
-### 计算开销
+1. 提取 oper + bnd hidden states (8层，L7+)
+2. Centering: 逐层去均值 + 去 PC1（移除 prompt 模板各向异性噪声）
+3. 几何特征: cos(oper,bnd) + norm_ratio + direction_diff
+4. PCA(8) → LR(C=0.01) → score_v3
 
-| 方法 | 增量 (ms) | 范围 |
-|---|---|---|
-| Static Regex | <0.1 | CPU |
-| cisco-ai-skill-scanner | <1 | CPU |
-| TF-IDF + LR | ~2 | CPU |
-| Boundary only | 20.1 | Shared-prefill |
-| **SkillProbe v1** | **18.7** | Shared-prefill |
-| **SkillProbe v2** | **~18.8** | Shared-prefill（Pass A ~50ms） |
-| RENNERVATE | ~35 | Shared-prefill |
-| RouteGuard (full) | ~60 | Shared-prefill |
-| LLM-as-Judge | ~600 | Standalone |
-
-所有内部方法共享 agent 必做的 prefill（~1945ms），检测几乎免费。**SkillProbe 是最快的内部方法。**
-
-### 待补充基线
-
-| 基线 | 类型 | 优先级 |
-|---|---|---|
-| PromptArmor (Shi et al. 2025) | 文本侧最强 IPI 防御 | 高 |
-| SkillScan (Liu et al. 2026b) | 静态+LLM 混合筛查 | 高 |
-| RENNERVATE (Zhong et al. 2025) | 注意力检测，RG 最强竞争者 | 高 |
-| Attention Tracker (Hung et al. 2024) | 注意力路由检测 | 中 |
-| Skill-Inject input filtering (Schmotz et al. 2026) | Naive 下界 | 中 |
-
----
-
-## 方法细节
-
-### 1. 三区域 Hidden-State 几何
-
-| 区域 | 内容 | 提取 |
-|---|---|---|
-| **Declaration** | SKILL.md YAML + 标题 + 首段 | mean pool |
-| **Operation** | 剩余 SKILL.md + 全部 scripts/*.py | mean pool |
-| **Boundary** | 最后一个 token（assistant boundary） | 单 token |
-
-从一次 prefill 前向传播中，在 8 个归一化深度（L3-L31）同时提取。
-
-### 2. 特征
-
-```python
-decl_u = decl / ‖decl‖       # L2 归一化
-oper_u = oper / ‖oper‖
-bnd_u  = bnd  / ‖bnd‖
-
-s1 = cos(oper, bnd)           # 操作-边界对齐度（最强单特征，SMD=-1.42）
-s2 = ‖oper‖ / ‖bnd‖           # 范数比
-s3 = cos(decl, oper)          # 声明-操作一致性
-s4 = cos(decl, bnd)           # 声明-边界影响
-
-→ StandardScaler → PCA(8) → LogisticRegression(C=0.01)
+5. Boundary Safety Gate:
+   if score_boundary < 0.15:   # 模型确定安全
+       risk = score_boundary    # 信任模型最终判断
+   else:
+       risk = score_v3          # v3 代码级检测
 ```
 
-最终配置：oper + bnd 双区域，去 interaction，PCA=8，C=0.01，L7+ 层选择。
+**Gate<0.15 是通用阈值**——Boundary 在安全样本上天然极低(~0.005)，在恶意样本上天然高(~0.9)。无需调参。
 
----
+### 关键设计决策
+
+| 组件 | 最佳配置 | 消融证据 |
+|---|---|---|
+| 区域 | oper+bnd（去 declaration） | decl-only = 随机 (AUC=0.49) |
+| 交互项 | 去掉 decl⊗oper | +0.020 AUROC（纯噪声） |
+| 降维 | PCA=8 | >16 过拟合，无 PCA 欠拟合 |
+| 正则化 | C=0.01 | C=1.0 TrainAUC=1.0（严重过拟合） |
+| 层选择 | L7+（排除 L3） | L3 读 prompt 模板，非 skill 内容 |
+| Centering | 去均值 + 去 PC1 | 跨分布 AUROC +43-59pp |
+| 安全门 | Boundary < 0.15 | Decoy FPR 100% → 0% |
+
+## v2 恶意归因
+
+| 攻击来源 | 归因准确率 | 说明 |
+|---|---|---|
+| 仅代码投毒 (SMP) | 100% | Code-Probe 完美检出 |
+| 仅声明投毒 | 44% | Decl-Probe L31 信号较弱 |
+| 双重投毒 | 100% | 双探针同时报警 |
+| 干净 | 100% | 双探针均通过 |
+| **总计** | **84%** | 175 样本 |
+
+## 计算开销
+
+| 方法 | 增量 | 范围 |
+|---|---|---|
+| Static Regex | < 0.1 ms | CPU |
+| TF-IDF + LR | ~2 ms | CPU |
+| Boundary only | 20.1 ms | Shared-prefill |
+| **SkillProbe v4** | **18.7 ms** | Shared-prefill |
+| RouteGuard (full) | ~60 ms | Shared-prefill |
+| LLM-as-Judge | ~600 ms | Standalone |
+
+所有内部方法共享 agent 必做的 prefill (~1945ms)。**SkillProbe 是最快的内部方法。**
+
+## 对比基线（9项）
+
+| # | 基线 | 输入 | 方法 |
+|---|---|---|---|
+| 1 | Static Regex | Skill 全文 | 10 个正则 |
+| 2 | TF-IDF + LR | Skill 全文 | TF-IDF(20K,1-2gram) → LR |
+| 3 | LLM-as-judge | Skill 全文 | Mistral-7B zero-shot |
+| 4 | Boundary only | Boundary token | L2-LR |
+| 5 | AgentLens | Boundary top-K | PCA(50) → LR |
+| 6 | RouteGuard | Attn+Hidden stats | 8层 → LR |
+| 7 | Relational v1 | decl+oper+bnd | 6几何+PCA64（已废弃） |
+| 8 | Centered Relational | decl+oper+bnd | −PC1+PCA64（已废弃） |
+| 9 | SkillProbe v4 | oper+bnd | centering+PCA(8)+LR+gating |
 
 ## 项目结构
 
 ```
 SkillProbe-GitHub/
 ├── README.md
-├── final.xlsx                         完整实验表
+├── final.xlsx                         完整实验表 (7 sheets, v4)
+├── experiment_data.md                 实验数据 markdown 导出
 ├── related_work.xlsx                  32 篇文献
 │
 ├── code/
 │   ├── src/
-│   │   ├── external_triad_contract_v1.py       三区域合约（char span → token map）
-│   │   ├── policy_relational_v3.py             关系特征构造
+│   │   ├── external_triad_contract_v1.py       三区域合约
+│   │   ├── foundation_loaded_prompt_contract_v1.py
+│   │   ├── policy_relational_v3.py             几何特征构造
 │   │   ├── foundation_v3_experiment.py         共享实验框架
-│   │   ├── baselines.py / probe.py / judge.py  基线 & 探针
-│   │   ├── model.py / data.py / activation_io.py 模型 & 数据
-│   │   └── *contract_v3.py                     SMP 合约变体
+│   │   └── baselines.py / probe.py / judge.py  基线 & 探针
 │   └── experiments/
-│       ├── extract_external_triad_features.py  GPU 三区域特征提取
-│       ├── foundation_v3_extract_internal_features.py
-│       ├── foundation_v3_internal_methods.py
-│       ├── foundation_v3_static_baselines.py
-│       └── routeguard_full_v3.py
-│
-├── data/
-│   ├── smp_manifest.jsonl                     SMP Stealth V2（484 样本）
-│   ├── samples/smp_stealth_samples_10.jsonl   样例
-│   ├── decoy/
-│   │   ├── decoys_155.jsonl                   Lexical Decoy（150 良性）
-│   │   └── attribution_dataset.jsonl          Attribution（175 样本）
-│   └── inverse_decoy/
-│       └── inverse_decoy_final.jsonl          Inverse Decoy（155 pairs）
+│       ├── extract_external_triad_features.py  GPU 特征提取
+│       ├── foundation_v3_internal_methods.py   训练 & 评估
+│       └── routeguard_full_v3.py               RouteGuard 复现
 │
 ├── scripts/
-│   ├── extract_skip_decl.py                   v2 Dual-Pass 提取
-│   ├── extract_decoy_features.py              边界特征 GPU 提取
-│   ├── generate_inverse_decoys_v2.py          逆诱饵 v2 生成
-│   ├── generate_decoys.py                     Lexical Decoy 生成
-│   ├── generate_decl_poison.py                声明投毒生成
-│   ├── build_*_prompts.py                     prompt 构建
-│   ├── fix_prompt_uniqueness.py               prompt 去重
-│   ├── malskillbench_*.py / masb_eval.py      MSB/MASB 评估
-│   └── download_masb.py                       MASB 下载
+│   ├── extract_skip_decl.py              v2 Dual-Pass 提取
+│   ├── generate_decoys.py / *_inverse*   诱饵生成
+│   └── fix_prompt_uniqueness.py          prompt 去重
 │
 └── tests/
     └── test_external_triad_contract_v1.py
 ```
-
----
 
 ## 引用
 
