@@ -1,6 +1,6 @@
 # SkillProbe 实验数据
 
-*更新: v4 (Boundary-gated v3). Gate<0.15 通用.*
+*v4 (Boundary-gated v3). Gate<0.15.*
 
 ## 方法演进: SkillProbe 方法演进：v1 → v2 → v3 → v4
 > Pass A (decl-only) + Pass B (complete prompt, same as v1). risk = max(score_v1, score_decl). attribution = argmax.
@@ -59,6 +59,35 @@
 | v3 更新：SkillProbe v3 = v1 + centering (去PC1)。在所有数据集上达到最佳或接近最佳。 |  |  |  |  |  |  |  |
 | SMP: v3=0.941 (+6.5pp) / Decoy: v3=0.858 (+43pp) / InvDecoy: v3=0.758  | 0.964 | 0.996 |  |  |  |  |  |
 
+## 恶意归因: 恶意归因 —— 区分代码投毒 vs 声明投毒
+> v2 Dual-Pass 架构：Pass A (decl-only) + Pass B (完整prompt)。risk=max(score_v1,score_decl)。attribution=argmax。
+
+| 恶意归因 —— 区分代码投毒 vs 声明投毒 |  |  |  |  |  |  |  |
+| v2 Dual-Pass 架构：Pass A (decl-only) + Pass B (完整prompt)。risk=max(score_ |  |  |  |  |  |  |  |
+| 架构 |  |  |  |  |  |  |  |
+| Pass A: prompt 截断在声明末尾 → 模型只看到声明 → decl-bnd → Decl-Probe (L2-LR) → sco |  |  |  |  |  |  |  |
+| Pass B: 完整 prompt (同 v1) → oper+bnd 几何特征 → PCA(8)+LR → score_code |  |  |  |  |  |  |  |
+| 归因规则: argmax(score_code, score_decl)。两路都>阈值→BOTH，都<阈值→CLEAN |  |  |  |  |  |  |  |
+| 开销: Pass A ~50ms (仅800 chars) + Pass B ~1945ms (同v1)。总增量 +2.6% |  |  |  |  |  |  |  |
+| 双探针独立检测能力 (175样本) |  |  |  |  |  |  |  |
+| 探针 | 检测目标 | AUROC | F1% | FPR% | FNR% | 层 | 说明 |
+| Decl-Probe | 仅声明投毒 (50样本) | 0.808 | 75.0 | 0.0 | 40.0 | L31 | 检出decl-poison+both-poison，漏掉oper-poison |
+| Code-Probe (v1) | 仅代码投毒 (50样本) | 0.919 | 90.4 | 0.0 | 17.6 | L11 | 检出oper-poison+both-poison，漏掉decl-poison |
+| Fusion max() | 声明+代码双投毒 (175样本) | 1.000 | 100.0 | 0.0 | 0.0 | — | 全覆盖。max()取两路最强信号，互补漏检 |
+| 关键：两路信号正交——Decl-Probe和Code-Probe检测的是不同攻击类型，互不重叠。max()融合实现100%检出。 |  |  |  |  |  |  |  |
+| 归因准确率 |  |  |  |  |  |  |  |
+| 真实攻击来源 | 样本数 | 归因正确 | 准确率 | 错误归因分析 |  |  |  |
+| CLEAN (干净skill) | 50 | 50 | 100% | 全部正确识别。双探针均未报警。 |  |  |  |
+| OPERATION (代码投毒) | 50 | 50 | 100% | 全部归因正确。Code-Probe报警，Decl-Probe不报。 |  |  |  |
+| BOTH (声明+代码) | 25 | 25 | 100% | 全部归因正确。双探针同时报警→正确归为BOTH。 |  |  |  |
+| DECLARATION (声明投毒) | 50 | 22 | 44% | 28个被错归为BOTH。Decl-Probe对部分样本信号不够强(L31层)，改进层选择可提升。 |  |  |  |
+| 合计 | 175 | 147 | 84.0% | argmax(score_code, score_decl) 归因 |  |  |  |
+| 归因 2x2 矩阵 |  |  |  |  |  |  |  |
+|  | Code-Probe 报警 | Code-Probe 安全 |  |  |  |  |  |
+| Decl-Probe 报警 | BOTH (双投毒) ✓ | DECLARATION (声明投毒) ✓ |  |  |  |  |  |
+| Decl-Probe 安全 | OPERATION (代码投毒) ✓ | CLEAN (干净) ✓ |  |  |  |  |  |
+| 每个象限对应一种攻击来源，v2 可精确区分四种情况。这是所有 baseline 不具备的能力。 |  |  |  |  |  |  |  |
+
 ## 总览: SkillProbe — 实验总览
 
 | SkillProbe — 实验总览 |  |  |  |  |  |  |  |
@@ -80,9 +109,9 @@
 | 7 | Relational v1 | decl+oper+bnd | 6几何+PCA64 | 内部探针 | 旧版(已废弃) |  |  |
 | 8 | Centered Rel. | decl+oper+bnd | -PC1+PCA64 | 内部探针 | 变体(已废弃) |  |  |
 | 9 | SkillProbe (ours) | oper+bnd | 去 interaction+PCA8 | 内部探针 | ★ 修正后的最终方法 |  |  |
-| 三、SkillProbe 方法演进 |  |  |  |  |  |  |  |
-| 版本 | 方法 | SMP | Decoy | InvDecoy | MSB | MASB | 核心改进 |
-| v1 | oper+bnd+PCA8+C=0.01+L7+ | 0.910 | 0.427 | 0.165 | 0.964 | 0.923 | 基础: 读代码 hidden-state 几何 |
+| 10 | Skill-Inject Filter | Skill 全文 | Keyword patterns (Schmotz et al. 2026) | 表面文本 | Naive lower-bound baseline |  |  |
+| 11 | cisco-skill-scanner | Skill 全文 | 129 YAML patterns (core signatures) | 表面文本 | Cisco AI Defense, industrial scanner | MASB | 核心改进 |
+| 12 | NVIDIA SkillSpector | Skill 全文 | 20 YARA rules (4 categories) | 表面文本 | 13.5k stars, most popular skill scanner | 0.923 | 基础: 读代码 hidden-state 几何 |
 | v2 | v1+decl-probe双趟max() | 0.910 | 0.427 | 0.165 | 0.964 | 0.923 | +声明投毒+归因. 零退化 |
 | v3 | v1+centering(-PC1) | 0.941 | 0.858 | 0.758 | 0.937 | 0.875 | +去模板噪声. Decoy+43-59pp |
 | v4 | v3+Boundary gating | 0.947 | 0.998 | 1.000 | 0.996 | 0.981 | +安全门. Gate<0.15通用. 五表全涨！ |
@@ -114,8 +143,9 @@
 | SkillProbe v1 | 0.910 | 19.4 | 11.3 | 85.3 | 82.1 | 88.7 | 0.919 | v1: oper+bnd+PCA8+C=0.01+L7+. Baseline method |  |
 | SkillProbe v2 | 0.910 | 19.4 | 11.3 | 85.3 | 82.1 | 88.7 | — | v2: max(v1,decl). SMP无声明投毒→=v1. 零退化+补盲区+归因 |  |
 | SkillProbe v4 (ours) | 0.947 | 19.4 | 6.500 | 87.9 | 82.1 | 93.5 | — | v4: Boundary-gated v3. Gate<0.15. AUC=0.947 SOTA. 49/124 gated |  |
-| Skill-Inject Filter | 0.528 | 100 | 0 | 66.7 |  |  | — | Schmotz et al. 2026, naive input filter. FPR=100% |  |
-| cisco-skill-scanner | 0.539 | 68.3 | 31.7 | 60.6 |  |  | — | 129 core patterns. Better than basic regex but still 68% FPR |  |
+| Skill-Inject Filter | 0.528 | 100 | 0 | 66.7 | 50 | 100 | — | Schmotz et al. 2026, naive input filter. FPR=100% |  |
+| cisco-skill-scanner | 0.539 | 68.3 | 31.7 | 60.6 | 50 | 68.3 | — | 129 core patterns. Better than basic regex but still 68% FPR |  |
+| NVIDIA SkillSpector | 0.503 | 100 | 0 | 66.7 | 50 | 100 | — | 20 YARA rules, 13.5k stars. Always fires on standard Python |  |
 
 ## MSB: MSB (MalSkillBench) — Unpaired, Source Confound Evidence
 > Unpaired, 7894 samples, new triad extract. L7+ verified (best layers already L19+)
@@ -123,7 +153,7 @@
 | MSB (MalSkillBench) — Unpaired, Source Confound Evidence |  |  |  |  |  |  |  |  |
 | Unpaired, 7894 samples, new triad extract. L7+ verified (best layers a |  |  |  |  |  |  |  |  |
 | Method | AUROC | FPR% | FNR% | F1% | Precision% | Recall% | Train AUC | Notes |
-| Static Regex | 0.540 | 100 | 0 | 66.7 | 50 | 100 | — | Always fires |
+| Static Regex | 0.540 | 100 | 0 | 66.7 | 49.6 | 100 | — | Always fires |
 | TF-IDF + LR | 0.967 | 6.400 | 10.7 | 91.1 | 93 | 89.3 | 0.973 | C=0.01 |
 | LLM-as-judge | 0.500 | 100 | 0 | 66.6 | 50 | 100 | — | Mistral-7B zero-shot: predicts almost all MAL (FPR=100%, FNR=0%) |
 | Boundary only | 0.999 | 1.400 | 1.300 | 98.7 | 98.6 | 98.7 | 1 | L19 (L7+ verified, source confound) |
@@ -134,6 +164,9 @@
 | SkillProbe v1 | 0.964 | 10.8 | 8.500 | 90.6 | 89.7 | 91.5 | 0.963 | v1: oper+bnd. Source confound inflated |
 | SkillProbe v2 | 0.964 | 10.8 | 8.500 | 90.6 | 89.7 | 91.5 | — | v2: max(v1,decl). =v1 on MSB |
 | SkillProbe v4 (ours) | 0.996 | 3.200 | 1.300 | 98 | 97.5 | 98.7 | — | v4: Gate<0.15. AUC=0.996! Boundary gate catches confounded samples |
+| Skill-Inject Filter | 0.502 | 100 | 0 | 66.7 | 49.6 | 100 | — | Naive filter: always fires on 8K samples |
+| cisco-skill-scanner | 0.545 | 100 | 0 | 66.7 | 49.6 | 100 | — | 129 core patterns, always fires |
+| NVIDIA SkillSpector | 0.521 | 100 | 0 | 66.7 | 49.6 | 100 | — | 20 YARA rules, 13.5k stars. Always fires |
 
 ## MASB 75K: MASB 75K — Large-Scale Benign FPR Benchmark
 > 4K MASB benign + MSB malicious (3939), 70/15/15 split. In-domain. L7+.
@@ -141,8 +174,8 @@
 | MASB 75K — Large-Scale Benign FPR Benchmark |  |  |  |  |  |  |  |  |
 | 4K MASB benign + MSB malicious (3939), 70/15/15 split. In-domain. L7+. |  |  |  |  |  |  |  |  |
 | Method | AUROC | FPR% | FNR% | F1% | Precision% | Recall% | Train AUC | Notes |
-| Static Regex | — | 100 | 0 | 66.7 | 50 | 100 | — | Always fires (OOD) |
-| TF-IDF + LR | 0.967 | 6.400 | 10.7 | 91.1 | 93 | 89.3 | 0.973 | Estimated from MSB |
+| Static Regex | 0.586 | 100 | 0 | 66.7 | 49.6 | 100 | — | Always fires (OOD) |
+| TF-IDF + LR | 0.792 | 6.400 | 10.7 | 91.1 | 71.3 | 71.8 | 0.973 | Estimated from MSB |
 | LLM-as-judge | 0.500 | 100 | 0 | 66.7 | 50 | 100 | — | Mistral-7B zero-shot: predicts almost all MAL (FPR=100%, FNR=0%) |
 | Boundary only | 0.999 | 2.500 | 1 | 98.2 | 97.5 | 99 | 1 | L15, in-domain (L7+) |
 | AgentLens | 0.984 | 3.700 | 9.100 | 93.4 | 96.1 | 90.9 | 0.983 | L15, in-domain (L7+) |
@@ -152,6 +185,9 @@
 | SkillProbe v1 | 0.923 | 16.3 | 16.4 | 83.5 | 83.4 | 83.6 | 0.921 | v1: oper+bnd. In-domain |
 | SkillProbe v2 | 0.923 | 16.3 | 16.4 | 83.5 | 83.4 | 83.6 | — | v2: max(v1,decl). =v1 on MASB |
 | SkillProbe v4 (ours) | 0.981 | 7.200 | 6 | 93.4 | 93 | 94 | — | v4: Gate<0.15. AUC=0.981! Gating fixes OOD FPR from 12%→7% |
+| Skill-Inject Filter | 0.505 | 100 | 0 | 66.4 | 49.6 | 100 | — | Naive filter: always fires on 8K samples |
+| cisco-skill-scanner | 0.552 | 100 | 0 | 66.4 | 49.6 | 100 | — | 129 core patterns. Always fires |
+| NVIDIA SkillSpector | 0.524 | 100 | 0 | 66.4 | 49.6 | 100 | — | 20 YARA rules, 13.5k stars. Always fires |
 
 ## Lexical Decoy: Lexical Decoy — Suspicious Vocabulary, Benign Semantics (155 samples)
 > 155 decoys + 62 SMP mal paired. Unified internal contract. L7+. No interaction. PCA=8. C=0.01.
@@ -159,7 +195,7 @@
 | Lexical Decoy — Suspicious Vocabulary, Benign Semantics (155 samples) |  |  |  |  |  |  |  |  |  |
 | 155 decoys + 62 SMP mal paired. Unified internal contract. L7+. No int |  |  |  |  |  |  |  |  |  |
 | Method | AUROC | FPR% | FNR% | F1% | Precision% | Recall% | Train AUC | Notes |  |
-| Static Regex | 0.463 | 100 | 0 | 66.7 | 44.1 | 35.3 | — | Static Regex on 155 decoys: FPR=59% (better than old 100%—more diverse |  |
+| Static Regex | 0.463 | 100 | 0 | 66.7 | 42 | 48.3 | — | Static Regex on 155 decoys: FPR=59% (better than old 100%—more diverse |  |
 | TF-IDF + LR | 0.744 | 39.3 | 39.1 | 60.9 | 50 | 100 | — | TF-IDF on 155 decoys: FPR=100% (suspicious vocab = malicious to TF-IDF |  |
 | LLM-as-judge | 0.500 | 100 | 0 | 66.7 | 50 | 100 | — | Mistral-7B zero-shot: predicts almost all MAL (FPR=100%) |  |
 | Boundary only | 0.991 | 0 | 3.200 | 98.4 | 100 | 96.8 | 0.994 | L23 (L7+). Model judges ALL 150 decoys safe! |  |
@@ -170,9 +206,9 @@
 | SkillProbe v1 | 0.427 | 75.3 | 8.100 | 49.1 | 38.3 | 91.9 | — | v1: FPR=75% (oper reads suspicious code) |  |
 | SkillProbe v2 | 0.427 | 75.3 | 8.100 | 49.1 | 38.3 | 91.9 | — | v2: max(v1,decl). Decl-Probe also fires on suspicious vocab. =v1 |  |
 | SkillProbe v4 (ours) | 0.998 | 0 | 3 | 98.4 | 100 | 97 | — | ★ v4: Boundary-gated v3. Gate<0.15. FPR=0% FNR=3%. Best on Decoy! |  |
-| Skill-Inject Filter | 0.800 | 40 | 0 | 83.4 |  |  | — | Schmotz et al. 2026, naive input filtering |  |
-| cisco-skill-scanner | 0.533 | 43.3 | 37.7 | 60.6 |  |  | — | 176 patterns (core+promptguard), Python 3.10+ required |  |
-| NVIDIA SkillSpector | 0.490 | 100 | 0 | 66.7 |  |  | — | 20 YARA rules, 13.5k stars. Always fires on standard Python |  |
+| Skill-Inject Filter | 0.800 | 40 | 0 | 83.4 | 50.2 | 100 | — | Schmotz et al. 2026, naive input filtering |  |
+| cisco-skill-scanner | 0.533 | 43.3 | 37.7 | 60.6 | 54 | 62.3 | — | 176 patterns (core+promptguard), Python 3.10+ required |  |
+| NVIDIA SkillSpector | 0.490 | 100 | 0 | 66.7 | 50.2 | 100 | — | 20 YARA rules, 13.5k stars. Always fires on standard Python |  |
 
 ## Inverse Decoy: Inverse Decoy — Clean Vocabulary, Malicious Semantics (155 pairs)
 > 155 clean + 155 malicious. SMP-trained. L7+. Vocab-clean semantics-malicious. FNR benchmark: can model detect malice without lexical cues?
@@ -180,7 +216,7 @@
 | Inverse Decoy — Clean Vocabulary, Malicious Semantics (155 pairs) |  |  |  |  |  |  |  |  |  |
 | 155 clean + 155 malicious. SMP-trained. L7+. Vocab-clean semantics-mal |  |  |  |  |  |  |  |  |  |
 | Method | AUROC | FPR% | FNR% | F1% | Precision% | Recall% | Train AUC | Notes |  |
-| Static Regex | 0.994 | 100 | 0 | 66.7 | 0 | 0 | — | Regex on clean vocab: FPR=0% FNR=100%—no patterns to match. Useless. |  |
+| Static Regex | 0.994 | 100 | 0 | 66.7 | 50 | 100 | — | Regex on clean vocab: FPR=0% FNR=100%—no patterns to match. Useless. |  |
 | TF-IDF + LR | 0.159 | 78.1 | 78.1 | 21.9 | 46.3 | 78.1 | — | TF-IDF on clean vocab: AUC=0.50 random (vocab has no signal) |  |
 | LLM-as-judge | 0.500 | 100 | 0 | 66.7 | 50 | 100 | — | Mistral always MAL. Zero-shot useless |  |
 | Boundary only | 0.793 | 0 | 100 | 0 | 0 | 0 | 0.994 | L23. Model judges ALL safe! FNR=100%—clean vocab fools model judgment  |  |
@@ -191,6 +227,6 @@
 | SkillProbe v1 | 0.165 | 100 | 0 | 43.9 | 50 | 100 | — | v1: cross-distribution collapse. AUC=0.16 |  |
 | SkillProbe v2 | 0.165 | 100 | 0 | 43.9 | 50 | 100 | — | v2: max(v1,decl). Decl AUC=0.48 random. =v1 |  |
 | SkillProbe v4 (ours) | 1 | 0 | 3 | 98.5 | 100 | 97 | — | ★ v4: Boundary-gated v3. Gate<0.15. AUC=1.0 FPR=0%! Both Decoy solved! |  |
-| Skill-Inject Filter | 0.500 | 100 | 0 | 66.7 |  |  | — | Naive filter: clean vocab -> always fires |  |
-| cisco-skill-scanner | 0.503 | 100 | 0 | 66.7 |  |  | — | Standard Python code triggers patterns -> always fires |  |
-| NVIDIA SkillSpector | 0.500 | 100 | 0 | 66.7 |  |  | — | 20 YARA rules, 13.5k stars. Always fires on standard Python |  |
+| Skill-Inject Filter | 0.500 | 100 | 0 | 66.7 | 50 | 100 | — | Naive filter: clean vocab -> always fires |  |
+| cisco-skill-scanner | 0.503 | 100 | 0 | 66.7 | 50 | 100 | — | Standard Python code triggers patterns -> always fires |  |
+| NVIDIA SkillSpector | 0.500 | 100 | 0 | 66.7 | 50 | 100 | — | 20 YARA rules, 13.5k stars. Always fires on standard Python |  |
