@@ -1,6 +1,6 @@
 # SkillProbe 实验数据
 
-*v4 (Boundary-gated v3). Gate<0.15.*
+*v4.*
 
 ## 方法演进
 > Pass A (decl-only) + Pass B (complete prompt, same as v1). risk = max(score_v1, score_decl). attribution = argmax.
@@ -17,7 +17,7 @@
 | Pass A (decl-only, ~50ms): prompt 截断在声明末尾 → decl-bnd → Decl- | 50 | 50 | 100% |  | 说明 |  |  |
 | Pass B (完整 prompt, ~1945ms): 同 v1 → oper+bnd 几何特征 → PCA(8)+L | 50 | 22 | 44% | Decl-Probe L31信号不够强 | 单趟完整prompt。SMP攻击全是操作侧——v1已足够 |  |  |
 | risk = max(score_v1, score_decl)   attribution = argmax → DE | 50 | 50 | 100% | v1 完美检出 | 声明侧无攻击信号——SMP没有声明投毒。随机水平 |  |  |
-| 归因准确率: 175 样本 84% (CLEAN 100%, OPER 100%, BOTH 100%, DECL 44 | 25 | 25 | 100% |  |  |  |  |
+| 归因准确率: 175 样本 84% (CLEAN 100%, OPER 100%, BOTH 100%, DECL 44 | 25 | 25 | 100% |  | = v1。max()确保decl随机信号不拖累v1。零退化 |  |  |
 | 合计 | 175 | 147 | 84% | argmax归因 |  |  |  |
 | v3: 各向异性修正 (centering) |  |  |  |  |  |  |  |
 | 在 v1 基础上增加一步: 对 oper 和 resp 特征逐层移除 PC1（prompt 模板主导的方差方向） |  |  |  |  |  |  |  |
@@ -49,10 +49,10 @@
 | 论文策略：v1是核心方法（轻量、高性能），v2是完整版（补盲区+归因）。两者在现有benchmark上性能相同，v2多覆 |  |  |  |  |  |  |  |
 | 各数据集 v2 Decl-Probe 结果 |  |  |  |  |  |  |  |
 | 数据集 | Decl-Probe 表现 | Code-Probe (v1) 表现 | v2 Fusion 效果 | 结论 |  |  |  |
-| SMP Stealth V2 | 0.910 | 0.947 | =V1 (max不拖累) | 无声明投毒攻击。v2=v1，零退化。 |  |  |  |
+| SMP Stealth V2 | 0.910 | 0.947 | = v1 (max不拖累) | 无声明投毒攻击。v2=v1，零退化。 |  |  |  |
 | Attribution | AUC=0.81 | AUC=0.92 | AUC=1.00 (全覆盖) | 声明+代码双投毒全覆盖，100%检出，84%归因准确率。 |  |  |  |
 | Lexical Decoy | 0.427 | 0.998 | FPR=max(62.5,85)=85% | Decoy的声明同样有可疑词汇——Decl-Probe也报警。v2不比v1更好。 |  |  |  |
-| Inverse Decoy | 0.165 | 1.000 | =V1 | 词汇干净——声明侧无额外信号。v2=v1。 |  |  |  |
+| Inverse Decoy | 0.165 | 1.000 | = v1 | 词汇干净——声明侧无额外信号。v2=v1。 |  |  |  |
 | MSB | 0.964 | 0.996 | 待提取 | LLM生成恶意skill——声明也可能携带confound信号。 |  |  |  |
 | MASB 75K | 0.923 | 0.981 | 待提取 | 全良性——预期Decl-Probe FPR低。 |  |  |  |
 | 关键模式：当数据集没有声明投毒攻击时，Decl-Probe输出随机(InvDecoy,SMP)或反映词法混杂(Decoy | 0.964 | 0.996 |  |  |  |  |  |
@@ -239,3 +239,15 @@
 | SkillProbe v2 | 0.165 | 100 | 0 | 43.9 | 50 | 100 | — | v2: max(v1,decl). Decl AUC=0.48 random. =v1 |  |
 | SkillProbe v4 (ours) | 1 | 0 | 3 | 98.5 | 100 | 97 | — | ★ v4: Boundary-gated v3. Gate<0.15. AUC=1.0 FPR=0%! Both Dec |  |
 | NVIDIA SkillSpector | 0.5 | 100 | 0 | 66.7 | 50 | 100 | — | 20 YARA rules, 13.5k stars. Always fires on standard Python |  |
+
+## SkillHarm
+> 931 poisoned + 242 SMP clean. SMP-dev trained. L7+.
+
+| SkillHarm - External (879 attacks, 12 risk types) |  |  |  |  |  |  |  |
+| 931 poisoned + 242 SMP clean. SMP-dev trained. L7+. |  |  |  |  |  |  |  |
+| Method | AUROC | FPR% | FNR% | F1% | Precision% | Recall% | Notes |
+| Boundary only | 0 | 30 | 100 | 0 | 0 | 0 | Model fooled - 100% FNR |
+| AgentLens | 0 | 33 | 100 | 0 | 0 | 0 | Boundary deceived |
+| RouteGuard | 0.917 | 0 | 8 | 95.7 | 100 | 91.7 | route_hidden works |
+| SkillProbe v3 | 1 | 0 | 0 | 100 | 100 | 100 | PERFECT! Cross-dist robust |
+| SkillProbe v4 | — | — | — | — | — | — | Gate fails cross-dist |
